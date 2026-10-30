@@ -15,7 +15,12 @@ object BackdropCapture {
     private var capturing = false
     private val main = Handler(Looper.getMainLooper())
 
-    fun capture(service: AccessibilityService, onResult: (Bitmap?) -> Unit) {
+    fun capture(
+        service: AccessibilityService,
+        scale: Float = 0.25f,
+        blurRadius: Int = 12,
+        onResult: (Bitmap?) -> Unit
+    ) {
         if (capturing) {
             onResult(null)
             return
@@ -34,7 +39,7 @@ object BackdropCapture {
                                 val hw = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
                                 val sw = hw?.copy(Bitmap.Config.ARGB_8888, false)
                                 buffer.close()
-                                if (sw != null) blurred = BlurHelper.fastBlur(sw, 0.25f, 12)
+                                if (sw != null) blurred = BlurHelper.fastBlur(sw, scale, blurRadius)
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }

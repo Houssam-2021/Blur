@@ -2,7 +2,6 @@ package com.miui.volumebar.ui
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
@@ -11,6 +10,7 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -31,9 +31,13 @@ import com.miui.volumebar.util.DockStore
  */
 class DockOverlayController(private val service: AccessibilityService) {
 
+    private companion object {
+        const val SETTLE_DELAY_MS = 450L
+    }
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-    private val items = mutableStateOf<List<DockItem>>(emptyList())
     private val backdrop = mutableStateOf<Bitmap?>(null)
     private val visible = mutableStateOf(true)
 
@@ -52,12 +56,12 @@ class DockOverlayController(private val service: AccessibilityService) {
             "android",
             "com.android.systemui",
             "com.samsung.android.app.cocktailbarservice", // edge panel
+            "com.google.android.googlequicksearchbox", // Google widget on the home screen fires window events
             service.packageName
         )
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        refreshItems()
         evaluate()
     }
 
@@ -99,37 +103,26 @@ class DockOverlayController(private val service: AccessibilityService) {
             return
         }
         if (capturePending) return
-        refreshItems()
-        if (items.value.isEmpty()) return
 
         // Capture before the dock window exists so the blur doesn't include the dock itself.
+        // Wait for the app-to-home transition to finish, otherwise the blur shows the app we just left.
         capturePending = true
-        BackdropCapture.capture(service) { bitmap ->
-            capturePending = false
-            if (!wanted() || overlayView != null) return@capture
-            backdrop.value = bitmap
-            addOverlay()
-        }
+        handler.postDelayed({
+            if (!wanted() || overlayView != null) {
+                capturePending = false
+                return@postDelayed
+            }
+            BackdropCapture.capture(service) { bitmap ->
+                capturePending = false
+                if (!wanted() || overlayView != null) return@capture
+                backdrop.value = bitmap
+                addOverlay()
+            }
+        }, SETTLE_DELAY_MS)
     }
 
     private fun hide() {
         if (overlayView != null) visible.value = false // UI animates out, then removes the window
-    }
-
-    private fun refreshItems() {
-        items.value = DockStore.dockPackages(service).map { pkg ->
-            DockItem(pkg, DockStore.label(service, pkg), DockStore.loadIcon(service, pkg))
-        }
-    }
-
-    private fun launch(packageName: String) {
-        val intent = service.packageManager.getLaunchIntentForPackage(packageName) ?: return
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
-            service.startActivity(intent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 
     private fun addOverlay() {
@@ -144,26 +137,28 @@ class DockOverlayController(private val service: AccessibilityService) {
             setViewTreeSavedStateRegistryOwner(owner)
             setContent {
                 DockOverlayUI(
-                    items = items.value,
                     visible = visible.value,
                     onExited = { if (!visible.value) removeOverlay() },
                     backdropBitmap = backdrop.value,
-                    onLaunch = { launch(it) }
+                    screenWidth = (windowManager.maximumWindowMetrics.bounds.width() /
+                            service.resources.displayMetrics.density).dp
                 )
             }
         }
 
+        // Full width: a WRAP_CONTENT overlay window is capped at ~320dp wide
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or // taps go to the launcher's own icons
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = (16 * service.resources.displayMetrics.density).toInt() // clear of the gesture bar
+            // Stock dock sits 23dp above the bottom; the overlay has 14dp of transparent padding
+            y = (9 * service.resources.displayMetrics.density).toInt()
         }
 
         try {

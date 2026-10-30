@@ -290,9 +290,9 @@ private fun CompactBar(
                 contentDescription = "Volume Icon",
                 tint = if (fillFraction > 0.12f) Accent else Color.White,
                 modifier = Modifier
-                    .size(32.dp)
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp)
+                    .padding(bottom = 9.dp) // keeps the icon's center where it was, 22dp up
+                    .size(26.dp)
             )
         }
 

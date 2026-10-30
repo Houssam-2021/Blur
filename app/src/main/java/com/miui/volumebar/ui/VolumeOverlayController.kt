@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Display
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.WindowManager
 import kotlin.math.roundToInt
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,6 +81,24 @@ class VolumeOverlayController(
         if (backdropBitmap.value == null) {
             captureBackdropBlur()
         }
+    }
+
+    /**
+     * A volume key press: change the media volume by one step and show the new level. The stream is set
+     * directly (not "whatever the system guesses"), so the sound and the bar always agree.
+     */
+    fun stepVolume(raise: Boolean) {
+        val max = audioManager.getStreamMaxVolume(stream)
+        val next = (audioManager.getStreamVolume(stream) + if (raise) 1 else -1).coerceIn(0, max)
+        audioManager.setStreamVolume(stream, next, 0)
+        showOverlayImmediate()
+        volumeFraction.floatValue = if (max > 0) next.toFloat() / max else 0f
+    }
+
+    /** Closes the bar with its exit animation (a tap outside it). */
+    fun dismiss() {
+        dismissRunnable?.let { handler.removeCallbacks(it) }
+        if (overlayView != null) overlayVisible.value = false
     }
 
     fun destroy() {
@@ -206,6 +225,16 @@ class VolumeOverlayController(
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
 
+            // A tap anywhere outside the bar closes it; the tap still reaches the app underneath
+            setOnTouchListener { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                    dismiss()
+                    true
+                } else {
+                    false
+                }
+            }
+
             setContent {
                 VolumeOverlayUI(
                     volumeFraction = volumeFraction.floatValue,
@@ -249,6 +278,7 @@ class VolumeOverlayController(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
