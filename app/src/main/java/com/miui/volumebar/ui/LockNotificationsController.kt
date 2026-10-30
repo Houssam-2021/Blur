@@ -24,6 +24,11 @@ import com.miui.volumebar.util.OverlayLifecycle
  */
 class LockNotificationsController(private val service: AccessibilityService) {
 
+    private companion object {
+        /** The glass notification cards on the lock screen are switched off. */
+        const val SHOW_ON_LOCKSCREEN = false
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val keyguard = service.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
@@ -46,6 +51,7 @@ class LockNotificationsController(private val service: AccessibilityService) {
 
     /** Called when the screen turns on. */
     fun onScreenOn() {
+        if (!SHOW_ON_LOCKSCREEN) return
         // Let the lock screen finish drawing before the screenshot
         handler.postDelayed({ showIfLocked() }, 700)
     }
