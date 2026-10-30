@@ -64,7 +64,6 @@ class MainActivity : ComponentActivity() {
 
                 val actions = SetupActions(
                     openAccessibility = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                    openNotifications = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                     openWriteSettings = {
                         startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
                     },
@@ -121,7 +120,6 @@ class MainActivity : ComponentActivity() {
         val power = getSystemService(POWER_SERVICE) as PowerManager
         return Permissions(
             accessibility = isAccessibilityServiceEnabled(),
-            notifications = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName),
             writeSettings = Settings.System.canWrite(this),
             dnd = nm.isNotificationPolicyAccessGranted,
             battery = power.isIgnoringBatteryOptimizations(packageName)

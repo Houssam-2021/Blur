@@ -47,7 +47,6 @@ private val TextSub = Color(0xFFA9B1C9)
 /** What the app has been allowed to do, refreshed while the screen is open. */
 data class Permissions(
     val accessibility: Boolean,
-    val notifications: Boolean,
     val writeSettings: Boolean,
     val dnd: Boolean,
     val battery: Boolean
@@ -56,14 +55,13 @@ data class Permissions(
 /** Opens the matching system screen for each step. */
 class SetupActions(
     val openAccessibility: () -> Unit,
-    val openNotifications: () -> Unit,
     val openWriteSettings: () -> Unit,
     val openDnd: () -> Unit,
     val openBattery: () -> Unit,
     val finish: () -> Unit
 )
 
-private enum class Step { Welcome, Accessibility, Notifications, Settings, Dnd, Battery, Done }
+private enum class Step { Welcome, Accessibility, Settings, Dnd, Battery, Done }
 
 // ----- Wizard -----
 
@@ -103,17 +101,6 @@ fun SetupWizard(permissions: Permissions, actions: SetupActions) {
                         granted = permissions.accessibility,
                         required = true,
                         onOpen = actions.openAccessibility,
-                        onContinue = next
-                    )
-                    Step.Notifications -> PermissionStep(
-                        icon = Icons.Rounded.Notifications,
-                        title = "Show your notifications",
-                        why = "So your notifications appear in the control center and on the lock screen.",
-                        steps = listOf("Tap the blue button", "Find \"Blurify\" in the list", "Switch it on"),
-                        buttonText = "Allow notifications",
-                        granted = permissions.notifications,
-                        required = false,
-                        onOpen = actions.openNotifications,
                         onContinue = next
                     )
                     Step.Settings -> PermissionStep(
@@ -201,8 +188,6 @@ private fun Welcome(onStart: () -> Unit) {
         Feature(Icons.Rounded.VolumeUp, "Glass volume bar", "Beautiful, smooth, and it matches your sound")
         Spacer(Modifier.height(14.dp))
         Feature(Icons.Rounded.Tune, "Control center", "Optional extra you can turn on in Settings")
-        Spacer(Modifier.height(14.dp))
-        Feature(Icons.Rounded.Lock, "Lock screen glass", "Your notifications on the lock screen")
         Spacer(Modifier.weight(1.2f))
         PrimaryButton("Get started", onStart)
         Spacer(Modifier.height(24.dp))
@@ -355,7 +340,6 @@ fun HomeScreen(
             Spacer(Modifier.height(10.dp))
             PermissionRow(Icons.Rounded.Accessibility, "Main switch", "Required", permissions.accessibility, actions.openAccessibility)
             Spacer(Modifier.height(10.dp))
-            PermissionRow(Icons.Rounded.Notifications, "Notifications", "Show them in the panel and on the lock screen", permissions.notifications, actions.openNotifications)
             Spacer(Modifier.height(10.dp))
             PermissionRow(Icons.Rounded.WbSunny, "Brightness and rotation", "For the sliders and toggles", permissions.writeSettings, actions.openWriteSettings)
             Spacer(Modifier.height(10.dp))
@@ -413,7 +397,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(10.dp))
             SwitchRow(
                 Icons.Rounded.Tune, "Control center",
-                "Swipe down from the top of the screen for toggles and notifications. Turn off to get your phone's normal panels back.",
+                "Swipe down from the top of the screen for toggles. Turn off to get your phone's normal panels back.",
                 controlCenterOn, onControlCenter
             )
             Spacer(Modifier.height(10.dp))

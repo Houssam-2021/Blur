@@ -150,7 +150,7 @@ class ControlCenterController(private val service: AccessibilityService) {
                     fired = true
                     // Right side opens the control center, the rest opens the notification panel
                     val rightSide = startX > service.resources.displayMetrics.widthPixels * 0.55f
-                    open(if (rightSide) CcPage.ControlCenter else CcPage.Notifications)
+                    open(CcPage.ControlCenter)
                 }
             }
             true
@@ -217,7 +217,7 @@ class ControlCenterController(private val service: AccessibilityService) {
         // Wait for the stock shade to leave the screen so the blur doesn't capture it
         handler.postDelayed({
             interceptPending = false
-            open(if (quickSettings) CcPage.ControlCenter else CcPage.Notifications)
+            open(CcPage.ControlCenter)
         }, 320)
     }
 
@@ -333,7 +333,7 @@ class ControlCenterController(private val service: AccessibilityService) {
 
     private val actions = CcActions(
         onDismiss = { dismiss() },
-        onPage = { page.value = it; resetIdle() },
+        onPage = { resetIdle() }, // the notification panel is not part of this build
         onSound = {
             // Ringer on <-> vibrate (silent mode needs Do Not Disturb access)
             audio.ringerMode = if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL)
