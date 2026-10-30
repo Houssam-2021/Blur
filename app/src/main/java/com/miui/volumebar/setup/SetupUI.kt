@@ -47,21 +47,17 @@ private val TextSub = Color(0xFFA9B1C9)
 /** What the app has been allowed to do, refreshed while the screen is open. */
 data class Permissions(
     val accessibility: Boolean,
-    val writeSettings: Boolean,
-    val dnd: Boolean,
     val battery: Boolean
 )
 
 /** Opens the matching system screen for each step. */
 class SetupActions(
     val openAccessibility: () -> Unit,
-    val openWriteSettings: () -> Unit,
-    val openDnd: () -> Unit,
     val openBattery: () -> Unit,
     val finish: () -> Unit
 )
 
-private enum class Step { Welcome, Accessibility, Settings, Dnd, Battery, Done }
+private enum class Step { Welcome, Accessibility, Battery, Done }
 
 // ----- Wizard -----
 
@@ -101,28 +97,6 @@ fun SetupWizard(permissions: Permissions, actions: SetupActions) {
                         granted = permissions.accessibility,
                         required = true,
                         onOpen = actions.openAccessibility,
-                        onContinue = next
-                    )
-                    Step.Settings -> PermissionStep(
-                        icon = Icons.Rounded.WbSunny,
-                        title = "Brightness and rotation",
-                        why = "So the sliders and toggles in the control center can change your screen brightness and rotation lock.",
-                        steps = listOf("Tap the blue button", "Switch \"Allow modifying system settings\" on"),
-                        buttonText = "Allow changes",
-                        granted = permissions.writeSettings,
-                        required = false,
-                        onOpen = actions.openWriteSettings,
-                        onContinue = next
-                    )
-                    Step.Dnd -> PermissionStep(
-                        icon = Icons.Rounded.DarkMode,
-                        title = "Do Not Disturb",
-                        why = "So the moon button can turn Do Not Disturb on and off.",
-                        steps = listOf("Tap the blue button", "Find \"Blurify\" and switch it on"),
-                        buttonText = "Allow Do Not Disturb",
-                        granted = permissions.dnd,
-                        required = false,
-                        onOpen = actions.openDnd,
                         onContinue = next
                     )
                     Step.Battery -> PermissionStep(
@@ -186,8 +160,6 @@ private fun Welcome(onStart: () -> Unit) {
         )
         Spacer(Modifier.height(32.dp))
         Feature(Icons.Rounded.VolumeUp, "Glass volume bar", "Beautiful, smooth, and it matches your sound")
-        Spacer(Modifier.height(14.dp))
-        Feature(Icons.Rounded.Tune, "Control center", "Optional extra you can turn on in Settings")
         Spacer(Modifier.weight(1.2f))
         PrimaryButton("Get started", onStart)
         Spacer(Modifier.height(24.dp))
@@ -340,34 +312,22 @@ fun HomeScreen(
             Spacer(Modifier.height(10.dp))
             PermissionRow(Icons.Rounded.Accessibility, "Main switch", "Required", permissions.accessibility, actions.openAccessibility)
             Spacer(Modifier.height(10.dp))
-            Spacer(Modifier.height(10.dp))
-            PermissionRow(Icons.Rounded.WbSunny, "Brightness and rotation", "For the sliders and toggles", permissions.writeSettings, actions.openWriteSettings)
-            Spacer(Modifier.height(10.dp))
-            PermissionRow(Icons.Rounded.DarkMode, "Do Not Disturb", "For the moon button", permissions.dnd, actions.openDnd)
-            Spacer(Modifier.height(10.dp))
             PermissionRow(Icons.Rounded.BatteryChargingFull, "Keep running", "Stops your phone sleeping the app", permissions.battery, actions.openBattery)
 
             Spacer(Modifier.height(28.dp))
             SectionTitle("How to use")
             Spacer(Modifier.height(10.dp))
             Tip(Icons.Rounded.VolumeUp, "Volume bar", "Press a volume button.")
-            Spacer(Modifier.height(10.dp))
-            Tip(Icons.Rounded.Tune, "Control center", "Optional. Turn it on in Settings, then swipe down from the top.")
 
             Spacer(Modifier.height(20.dp))
         }
     }
 }
 
-// ----- Settings (the control center and the glass dock live here) -----
+// ----- Settings -----
 
 @Composable
 fun SettingsScreen(
-    controlCenterOn: Boolean,
-    dockOn: Boolean,
-    onControlCenter: (Boolean) -> Unit,
-    onDock: (Boolean) -> Unit,
-    onTryControlCenter: () -> Unit,
     onRunSetupAgain: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -391,19 +351,6 @@ fun SettingsScreen(
                 Spacer(Modifier.width(14.dp))
                 Text("Settings", color = TextMain, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             }
-
-            Spacer(Modifier.height(24.dp))
-            SectionTitle("Extras")
-            Spacer(Modifier.height(10.dp))
-            SwitchRow(
-                Icons.Rounded.Tune, "Control center",
-                "Swipe down from the top of the screen for toggles. Turn off to get your phone's normal panels back.",
-                controlCenterOn, onControlCenter
-            )
-            Spacer(Modifier.height(10.dp))
-            SwitchRow(Icons.Rounded.Dock, "Glass home dock", "A glass bar behind your dock apps", dockOn, onDock)
-            Spacer(Modifier.height(14.dp))
-            PrimaryButton("Try the control center", onTryControlCenter, enabled = controlCenterOn)
 
             Spacer(Modifier.height(28.dp))
             SectionTitle("Help")
