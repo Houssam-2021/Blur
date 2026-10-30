@@ -11,3 +11,7 @@ captures/
 proj/
 *.bak
 *.apk
+
+keystore.properties
+*.jks
+*.keystore
