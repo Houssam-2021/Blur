@@ -1,5 +1,6 @@
 package com.miui.volumebar.ui
 
+import android.os.Build
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
 import android.content.Context
@@ -125,7 +126,7 @@ class LockNotificationsController(private val service: AccessibilityService) {
             gravity = Gravity.TOP
             // Below the clock and the notification icons, above the charging text
             y = (service.resources.displayMetrics.heightPixels * 0.50f).toInt()
-            fitInsetsTypes = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) fitInsetsTypes = 0
         }
 
         try {

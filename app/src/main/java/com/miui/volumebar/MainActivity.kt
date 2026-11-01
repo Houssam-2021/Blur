@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.core.app.NotificationManagerCompat
 import com.miui.volumebar.service.VolumeAccessibilityService
+import com.miui.volumebar.setup.CustomizeScreen
 import com.miui.volumebar.setup.HomeScreen
 import com.miui.volumebar.setup.Permissions
 import com.miui.volumebar.setup.SettingsScreen
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
                 var controlCenterOn by remember { mutableStateOf(ControlCenterController.enabled(this)) }
                 var dockOn by remember { mutableStateOf(DockStore.enabled(this)) }
                 var showSettings by remember { mutableStateOf(false) }
+                var showCustomize by remember { mutableStateOf(false) }
 
                 // Re-check while the screen is open so steps tick off as soon as the user returns
                 LaunchedEffect(Unit) {
@@ -83,10 +85,13 @@ class MainActivity : ComponentActivity() {
                 if (!setupDone) {
                     SetupWizard(permissions, actions)
                 } else {
-                    BackHandler(enabled = showSettings) { showSettings = false }
-                    if (showSettings) {
+                    BackHandler(enabled = showSettings) { if (showCustomize) showCustomize = false else showSettings = false }
+                    if (showCustomize) {
+                        CustomizeScreen(onBack = { showCustomize = false })
+                    } else if (showSettings) {
                         SettingsScreen(
                             controlCenterOn = controlCenterOn,
+                            controlCenterSupported = ControlCenterController.supported(),
                             dockOn = dockOn,
                             onControlCenter = {
                                 controlCenterOn = it
@@ -96,6 +101,7 @@ class MainActivity : ComponentActivity() {
                                 dockOn = it
                                 DockStore.setEnabled(this, it)
                             },
+                            onCustomize = { showCustomize = true },
                             onTryControlCenter = { VolumeAccessibilityService.instance?.openControlCenter() },
                             onRunSetupAgain = {
                                 prefs.edit().putBoolean("setup_done", false).apply()

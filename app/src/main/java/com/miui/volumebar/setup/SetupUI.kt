@@ -1,5 +1,11 @@
 package com.miui.volumebar.setup
 
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.ui.platform.LocalContext
+import com.miui.volumebar.ui.CcTile
+import com.miui.volumebar.ui.CcToggle
+import com.miui.volumebar.util.CcLayout
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -380,10 +386,12 @@ fun HomeScreen(
 @Composable
 fun SettingsScreen(
     controlCenterOn: Boolean,
+    controlCenterSupported: Boolean,
     dockOn: Boolean,
     onControlCenter: (Boolean) -> Unit,
     onDock: (Boolean) -> Unit,
     onTryControlCenter: () -> Unit,
+    onCustomize: () -> Unit,
     onRunSetupAgain: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -413,13 +421,26 @@ fun SettingsScreen(
             Spacer(Modifier.height(10.dp))
             SwitchRow(
                 Icons.Rounded.Tune, "Control center",
-                "Swipe down from the top of the screen for toggles and notifications. Turn off to get your phone's normal panels back.",
-                controlCenterOn, onControlCenter
+                if (controlCenterSupported) "Swipe down from the top of the screen for toggles and notifications. Turn off to get your phone's normal panels back."
+                else "Needs Android 12 or newer. The volume bar works on Android 9 and up.",
+                controlCenterOn && controlCenterSupported, onControlCenter, enabled = controlCenterSupported
             )
             Spacer(Modifier.height(10.dp))
             SwitchRow(Icons.Rounded.Dock, "Glass home dock", "A glass bar behind your dock apps", dockOn, onDock)
             Spacer(Modifier.height(14.dp))
-            PrimaryButton("Try the control center", onTryControlCenter, enabled = controlCenterOn)
+            PrimaryButton("Try the control center", onTryControlCenter, enabled = controlCenterOn && controlCenterSupported)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).clickable { onCustomize() }.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconBadge(Icons.Rounded.Tune, 44)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Customize the layout", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Show, hide and reorder the toggles and shortcuts", color = TextSub, fontSize = 13.sp)
+                }
+            }
 
             Spacer(Modifier.height(28.dp))
             SectionTitle("Help")
@@ -538,7 +559,7 @@ private fun Banner(title: String, text: String, action: String, onClick: () -> U
 }
 
 @Composable
-private fun SwitchRow(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
     Row(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -549,7 +570,7 @@ private fun SwitchRow(icon: ImageVector, title: String, subtitle: String, checke
             Text(title, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = TextSub, fontSize = 13.sp)
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 
@@ -571,5 +592,140 @@ private fun PermissionRow(icon: ImageVector, title: String, subtitle: String, gr
             Text("Allow", color = Accent, fontWeight = FontWeight.Bold, fontSize = 15.sp,
                 modifier = Modifier.clickable { onFix() }.padding(8.dp))
         }
+    }
+}
+
+// ----- Customize the control center: show, hide and reorder -----
+
+@Composable
+fun CustomizeScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    var blockOrder by remember { mutableStateOf(CcLayout.blocks.order(context)) }
+    var blockOff by remember { mutableStateOf(CcLayout.blocks.hidden(context)) }
+    var toggleOrder by remember { mutableStateOf(CcLayout.toggles.order(context)) }
+    var toggleOff by remember { mutableStateOf(CcLayout.toggles.hidden(context)) }
+    var tileOrder by remember { mutableStateOf(CcLayout.tiles.order(context)) }
+    var tileOff by remember { mutableStateOf(CcLayout.tiles.hidden(context)) }
+
+    Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp)
+        ) {
+            Spacer(Modifier.height(20.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(Card).clickable { onBack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.ArrowBack, "Back", tint = TextMain, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Text("Control center layout", color = TextMain, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Turn parts on or off and move them with the arrows. Changes show the next time you open the control center.",
+                color = TextSub, fontSize = 14.sp, lineHeight = 20.sp
+            )
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Sections")
+            Spacer(Modifier.height(10.dp))
+            ReorderList(blockOrder, blockOff, { it.label }) { order, off ->
+                blockOrder = order; blockOff = off; CcLayout.blocks.save(context, order, off)
+            }
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Quick toggles")
+            Spacer(Modifier.height(10.dp))
+            ReorderList(toggleOrder, toggleOff, ::toggleName) { order, off ->
+                toggleOrder = order; toggleOff = off; CcLayout.toggles.save(context, order, off)
+            }
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Shortcuts")
+            Spacer(Modifier.height(10.dp))
+            ReorderList(tileOrder, tileOff, ::tileName) { order, off ->
+                tileOrder = order; tileOff = off; CcLayout.tiles.save(context, order, off)
+            }
+
+            Spacer(Modifier.height(24.dp))
+            PrimaryButton("Reset to default", {
+                CcLayout.resetAll(context)
+                blockOrder = CcLayout.blocks.order(context); blockOff = CcLayout.blocks.hidden(context)
+                toggleOrder = CcLayout.toggles.order(context); toggleOff = CcLayout.toggles.hidden(context)
+                tileOrder = CcLayout.tiles.order(context); tileOff = CcLayout.tiles.hidden(context)
+            })
+            Spacer(Modifier.height(30.dp))
+        }
+    }
+}
+
+private fun toggleName(t: CcToggle) = when (t) {
+    CcToggle.Rotation -> "Rotation lock"
+    CcToggle.Airplane -> "Airplane mode"
+    CcToggle.Flashlight -> "Flashlight"
+    CcToggle.Data -> "Mobile data"
+    CcToggle.Hotspot -> "Hotspot"
+    CcToggle.Location -> "Location"
+    CcToggle.Screenshot -> "Screenshot"
+    CcToggle.Dnd -> "Do Not Disturb"
+}
+
+private fun tileName(t: CcTile) = when (t) {
+    CcTile.ScreenRecorder -> "Screen recorder"
+    CcTile.QuickShare -> "Quick Share"
+    CcTile.SmartView -> "Smart View"
+    CcTile.Modes -> "Modes"
+}
+
+@Composable
+private fun <T : Enum<T>> ReorderList(
+    order: List<T>,
+    off: Set<T>,
+    label: (T) -> String,
+    onChange: (List<T>, Set<T>) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        order.forEachIndexed { i, item ->
+            val on = item !in off
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    label(item),
+                    color = if (on) TextMain else TextSub,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                ArrowButton(Icons.Rounded.KeyboardArrowUp, "Move up", enabled = i > 0) {
+                    onChange(order.toMutableList().also { java.util.Collections.swap(it, i, i - 1) }, off)
+                }
+                ArrowButton(Icons.Rounded.KeyboardArrowDown, "Move down", enabled = i < order.size - 1) {
+                    onChange(order.toMutableList().also { java.util.Collections.swap(it, i, i + 1) }, off)
+                }
+                Switch(checked = on, onCheckedChange = { onChange(order, if (it) off - item else off + item) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArrowButton(icon: ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, description, tint = if (enabled) TextMain else TextSub.copy(alpha = 0.35f), modifier = Modifier.size(24.dp))
     }
 }

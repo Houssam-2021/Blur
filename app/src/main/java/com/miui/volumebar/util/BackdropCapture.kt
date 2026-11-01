@@ -2,12 +2,9 @@ package com.miui.volumebar.util
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.view.Display
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /** One-shot screenshot of the whole display, blurred, delivered on the main thread (null on failure). */
 object BackdropCapture {
@@ -25,38 +22,20 @@ object BackdropCapture {
             onResult(null)
             return
         }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            onResult(null) // no screenshot API before Android 11: the glass falls back to a plain surface
+            return
+        }
         capturing = true
-        try {
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                service.mainExecutor,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                        CoroutineScope(Dispatchers.Default).launch {
-                            var blurred: Bitmap? = null
-                            try {
-                                val buffer = result.hardwareBuffer
-                                val hw = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
-                                val sw = hw?.copy(Bitmap.Config.ARGB_8888, false)
-                                buffer.close()
-                                if (sw != null) blurred = BlurHelper.fastBlur(sw, scale, blurRadius)
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                            capturing = false
-                            main.post { onResult(blurred) }
-                        }
-                    }
-
-                    override fun onFailure(errorCode: Int) {
-                        capturing = false
-                        onResult(null)
-                    }
-                }
-            )
-        } catch (e: Exception) {
+        ScreenshotApi.take(service) { shot ->
+            var blurred: Bitmap? = null
+            try {
+                if (shot != null) blurred = BlurHelper.fastBlur(shot, scale, blurRadius)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
             capturing = false
-            onResult(null)
+            main.post { onResult(blurred) }
         }
     }
 }

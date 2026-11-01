@@ -38,8 +38,7 @@ fun LockNotificationsUI(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val progress = remember { mutableStateListOf<Animatable<Float, androidx.compose.animation.core.AnimationVector1D>>() }
-    while (progress.size < cards.size) progress.add(Animatable(0f))
+    val progress = remember(cards.size) { List(cards.size) { Animatable(0f) } }
 
     LaunchedEffect(visible) {
         if (!visible) {

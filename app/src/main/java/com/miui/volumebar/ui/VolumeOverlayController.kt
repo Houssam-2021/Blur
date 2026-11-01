@@ -1,5 +1,6 @@
 package com.miui.volumebar.ui
 
+import android.os.Build
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.graphics.Bitmap
@@ -28,6 +29,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.miui.volumebar.util.BlurHelper
+import com.miui.volumebar.util.ScreenshotApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -321,40 +323,17 @@ class VolumeOverlayController(
 
     private fun captureBackdropBlur() {
         if (isCapturingScreenshot) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return // no screenshot API before Android 11
         isCapturingScreenshot = true
-        try {
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                service.mainExecutor,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                        CoroutineScope(Dispatchers.Default).launch {
-                            try {
-                                val buffer = result.hardwareBuffer
-                                val hwBitmap = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
-                                val swBitmap = hwBitmap?.copy(Bitmap.Config.ARGB_8888, false)
-                                buffer.close()
-
-                                if (swBitmap != null) {
-                                    // Blur the whole screen once; each UI element draws only the
-                                    // region directly behind itself.
-                                    backdropBitmap.value = BlurHelper.fastBlur(swBitmap, 0.25f, 12)
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            } finally {
-                                isCapturingScreenshot = false
-                            }
-                        }
-                    }
-
-                    override fun onFailure(errorCode: Int) {
-                        isCapturingScreenshot = false
-                    }
-                }
-            )
-        } catch (_: Exception) {
-            isCapturingScreenshot = false
+        ScreenshotApi.take(service) { shot ->
+            try {
+                // Blur the whole screen once; each UI element draws only the region directly behind itself.
+                if (shot != null) backdropBitmap.value = BlurHelper.fastBlur(shot, 0.25f, 12)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isCapturingScreenshot = false
+            }
         }
     }
 

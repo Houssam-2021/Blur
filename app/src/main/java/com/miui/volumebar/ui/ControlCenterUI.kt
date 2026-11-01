@@ -1,5 +1,8 @@
 package com.miui.volumebar.ui
 
+import com.miui.volumebar.util.CcBlock
+import com.miui.volumebar.util.CcLayout
+import androidx.compose.ui.platform.LocalContext
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -196,6 +199,9 @@ private fun ControlCenterPage(
     actions: CcActions,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    // Read when the panel opens, so a change made in Blurify's settings shows up the next time
+    val layout = remember { CcLayout.load(context) }
     val rows = (0 until 8).map { rememberSettleProgress(visible, 55L + 28L * it) }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -206,116 +212,112 @@ private fun ControlCenterPage(
             verticalArrangement = Arrangement.Top
         ) {
             Header(actions, Modifier.settle { rows[0].value }, full = true)
-            Spacer(Modifier.height(11.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ConnectivityPill(
-                        backdrop = backdrop,
-                        icon = Icons.Rounded.Wifi,
-                        label = "Wi-Fi",
-                        sub = if (state.wifiOn) "Connected" else "Off",
-                        active = state.wifiOn,
-                        onClick = actions.onWifi,
-                        modifier = Modifier.settle { rows[1].value }
+            layout.blocks.forEachIndexed { i, block ->
+                val row = rows[(i + 1).coerceAtMost(7)]
+                Spacer(
+                    Modifier.height(
+                        when {
+                            i == 0 -> 11.dp
+                            block == CcBlock.Toggles -> 10.dp
+                            block == CcBlock.Volume -> 15.dp
+                            block == CcBlock.Brightness -> 17.dp
+                            block == CcBlock.Shortcuts -> 13.dp
+                            else -> 10.dp
+                        }
                     )
-                    ConnectivityPill(
+                )
+                when (block) {
+                    CcBlock.Connectivity -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ConnectivityPill(
+                                backdrop = backdrop,
+                                icon = Icons.Rounded.Wifi,
+                                label = "Wi-Fi",
+                                sub = if (state.wifiOn) "Connected" else "Off",
+                                active = state.wifiOn,
+                                onClick = actions.onWifi,
+                                modifier = Modifier.settle { row.value }
+                            )
+                            ConnectivityPill(
+                                backdrop = backdrop,
+                                icon = Icons.Rounded.Bluetooth,
+                                label = "Bluetooth",
+                                sub = if (state.bluetoothOn) "On" else "Off",
+                                active = state.bluetoothOn,
+                                onClick = actions.onBluetooth,
+                                modifier = Modifier.settle { row.value }
+                            )
+                        }
+                        MediaCard(
+                            backdrop = backdrop,
+                            playing = state.musicPlaying,
+                            actions = actions,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(158.dp)
+                                .settle { row.value }
+                        )
+                    }
+                    CcBlock.Toggles ->
+                        if (layout.toggles.isNotEmpty()) {
+                            ToggleCard(backdrop, state, actions, layout.toggles, Modifier.settle { row.value })
+                        }
+                    CcBlock.Volume -> GlassSlider(
                         backdrop = backdrop,
-                        icon = Icons.Rounded.Bluetooth,
-                        label = "Bluetooth",
-                        sub = if (state.bluetoothOn) "On" else "Off",
-                        active = state.bluetoothOn,
-                        onClick = actions.onBluetooth,
-                        modifier = Modifier.settle { rows[1].value }
+                        fraction = state.volume,
+                        icon = Icons.Rounded.MusicNote,
+                        onChange = actions.onVolume,
+                        onInteract = actions.onInteract,
+                        modifier = Modifier.settle { row.value }
                     )
+                    CcBlock.Brightness -> GlassSlider(
+                        backdrop = backdrop,
+                        fraction = state.brightness,
+                        icon = Icons.Rounded.WbSunny,
+                        onChange = actions.onBrightness,
+                        onInteract = actions.onInteract,
+                        modifier = Modifier.settle { row.value }
+                    )
+                    CcBlock.Shortcuts -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        layout.tiles.chunked(2).forEach { pair ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                pair.forEach { tile ->
+                                    TilePill(tile, state, backdrop, actions, Modifier.weight(1f).settle { row.value })
+                                }
+                                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
                 }
-                MediaCard(
-                    backdrop = backdrop,
-                    playing = state.musicPlaying,
-                    actions = actions,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(158.dp)
-                        .settle { rows[2].value }
-                )
-            }
-
-            Spacer(Modifier.height(10.dp))
-            ToggleCard(backdrop, state, actions, Modifier.settle { rows[3].value })
-
-            Spacer(Modifier.height(15.dp))
-            GlassSlider(
-                backdrop = backdrop,
-                fraction = state.volume,
-                icon = Icons.Rounded.MusicNote,
-                onChange = actions.onVolume,
-                onInteract = actions.onInteract,
-                modifier = Modifier.settle { rows[4].value }
-            )
-            Spacer(Modifier.height(17.dp))
-            GlassSlider(
-                backdrop = backdrop,
-                fraction = state.brightness,
-                icon = Icons.Rounded.WbSunny,
-                onChange = actions.onBrightness,
-                onInteract = actions.onInteract,
-                modifier = Modifier.settle { rows[5].value }
-            )
-
-            Spacer(Modifier.height(13.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ConnectivityPill(
-                    backdrop = backdrop,
-                    icon = Icons.Rounded.Videocam,
-                    label = "Recorder",
-                    sub = "Screen",
-                    active = false,
-                    onClick = { actions.onTile(CcTile.ScreenRecorder) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .settle { rows[6].value }
-                )
-                ConnectivityPill(
-                    backdrop = backdrop,
-                    icon = Icons.Rounded.Share,
-                    label = "Quick Share",
-                    sub = "Contacts only",
-                    active = true,
-                    onClick = { actions.onTile(CcTile.QuickShare) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .settle { rows[6].value }
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ConnectivityPill(
-                    backdrop = backdrop,
-                    icon = Icons.Rounded.Cast,
-                    label = "Smart View",
-                    sub = "Mirror screen",
-                    active = false,
-                    onClick = { actions.onTile(CcTile.SmartView) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .settle { rows[7].value }
-                )
-                ConnectivityPill(
-                    backdrop = backdrop,
-                    icon = Icons.Rounded.PieChart,
-                    label = "Modes",
-                    sub = if (state.dnd) "Do Not Disturb" else "",
-                    active = state.dnd,
-                    onClick = { actions.onTile(CcTile.Modes) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .settle { rows[7].value }
-                )
             }
         }
+    }
+}
+
+@Composable
+private fun TilePill(tile: CcTile, state: CcUiState, backdrop: Bitmap?, actions: CcActions, modifier: Modifier) {
+    when (tile) {
+        CcTile.ScreenRecorder -> ConnectivityPill(
+            backdrop = backdrop, icon = Icons.Rounded.Videocam, label = "Recorder", sub = "Screen",
+            active = false, onClick = { actions.onTile(CcTile.ScreenRecorder) }, modifier = modifier
+        )
+        CcTile.QuickShare -> ConnectivityPill(
+            backdrop = backdrop, icon = Icons.Rounded.Share, label = "Quick Share", sub = "Contacts only",
+            active = true, onClick = { actions.onTile(CcTile.QuickShare) }, modifier = modifier
+        )
+        CcTile.SmartView -> ConnectivityPill(
+            backdrop = backdrop, icon = Icons.Rounded.Cast, label = "Smart View", sub = "Mirror screen",
+            active = false, onClick = { actions.onTile(CcTile.SmartView) }, modifier = modifier
+        )
+        CcTile.Modes -> ConnectivityPill(
+            backdrop = backdrop, icon = Icons.Rounded.PieChart, label = "Modes",
+            sub = if (state.dnd) "Do Not Disturb" else "",
+            active = state.dnd, onClick = { actions.onTile(CcTile.Modes) }, modifier = modifier
+        )
     }
 }
 
@@ -819,7 +821,16 @@ private fun MediaButton(icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ToggleCard(backdrop: Bitmap?, state: CcUiState, actions: CcActions, modifier: Modifier) {
+private fun ToggleCard(
+    backdrop: Bitmap?,
+    state: CcUiState,
+    actions: CcActions,
+    toggles: List<CcToggle>,
+    modifier: Modifier
+) {
+    val toggleRows = toggles.chunked(4)
+    // Two rows give the original 155dp card; every row adds 65dp
+    val cardHeight = (43 + toggleRows.size * 47 + (toggleRows.size - 1) * 18).dp
     GlassSurface(
         backdrop = backdrop,
         cornerRadius = 32.dp,
@@ -828,7 +839,7 @@ private fun ToggleCard(backdrop: Bitmap?, state: CcUiState, actions: CcActions, 
         bend = 15.dp,
         modifier = modifier
             .fillMaxWidth()
-            .height(155.dp)
+            .height(cardHeight)
             .pointerInput(Unit) { detectTapGestures { actions.onInteract() } }
     ) {
         Column(
@@ -838,17 +849,18 @@ private fun ToggleCard(backdrop: Bitmap?, state: CcUiState, actions: CcActions, 
                 .padding(top = 21.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Toggle(Icons.Rounded.ScreenLockRotation, state.rotationLocked) { actions.onToggle(CcToggle.Rotation) }
-                Toggle(Icons.Rounded.AirplanemodeActive, state.airplane) { actions.onToggle(CcToggle.Airplane) }
-                Toggle(Icons.Rounded.FlashlightOn, state.flashlight) { actions.onToggle(CcToggle.Flashlight) }
-                Toggle(Icons.Rounded.SwapVert, state.dataOn) { actions.onToggle(CcToggle.Data) }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Toggle(Icons.Rounded.RssFeed, false) { actions.onToggle(CcToggle.Hotspot) }
-                Toggle(Icons.Rounded.LocationOn, state.location) { actions.onToggle(CcToggle.Location) }
-                Toggle(Icons.Rounded.CropFree, false) { actions.onToggle(CcToggle.Screenshot) }
-                Toggle(Icons.Rounded.DarkMode, state.dnd) { actions.onToggle(CcToggle.Dnd) }
+            toggleRows.forEach { rowItems ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    for (slot in 0 until 4) {
+                        val t = rowItems.getOrNull(slot)
+                        if (t != null) {
+                            val (icon, on) = toggleLook(t, state)
+                            Toggle(icon, on) { actions.onToggle(t) }
+                        } else {
+                            Spacer(Modifier.size(47.dp))
+                        }
+                    }
+                }
             }
         }
         // The grabber at the bottom of the card
@@ -861,6 +873,17 @@ private fun ToggleCard(backdrop: Bitmap?, state: CcUiState, actions: CcActions, 
                 .background(Color(0x99FFFFFF))
         )
     }
+}
+
+private fun toggleLook(t: CcToggle, s: CcUiState): Pair<ImageVector, Boolean> = when (t) {
+    CcToggle.Rotation -> Icons.Rounded.ScreenLockRotation to s.rotationLocked
+    CcToggle.Airplane -> Icons.Rounded.AirplanemodeActive to s.airplane
+    CcToggle.Flashlight -> Icons.Rounded.FlashlightOn to s.flashlight
+    CcToggle.Data -> Icons.Rounded.SwapVert to s.dataOn
+    CcToggle.Hotspot -> Icons.Rounded.RssFeed to false
+    CcToggle.Location -> Icons.Rounded.LocationOn to s.location
+    CcToggle.Screenshot -> Icons.Rounded.CropFree to false
+    CcToggle.Dnd -> Icons.Rounded.DarkMode to s.dnd
 }
 
 @Composable

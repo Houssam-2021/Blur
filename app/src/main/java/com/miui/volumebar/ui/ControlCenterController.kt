@@ -1,5 +1,6 @@
 package com.miui.volumebar.ui
 
+import android.os.Build
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
 import android.app.NotificationManager
@@ -48,7 +49,10 @@ class ControlCenterController(private val service: AccessibilityService) {
         fun prefs(context: Context): SharedPreferences =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-        fun enabled(context: Context) = prefs(context).getBoolean(KEY_ENABLED, false)
+        /** The control center takes over the system shade, which Android can only close for us from version 12. */
+        fun supported() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+        fun enabled(context: Context) = supported() && prefs(context).getBoolean(KEY_ENABLED, false)
 
         fun setEnabled(context: Context, value: Boolean) {
             prefs(context).edit().putBoolean(KEY_ENABLED, value).apply()
@@ -213,7 +217,11 @@ class ControlCenterController(private val service: AccessibilityService) {
         if ((service.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked) return
 
         interceptPending = true
-        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        // Android 12+ can close the shade directly; older versions close it with Back
+        service.performGlobalAction(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE
+            else AccessibilityService.GLOBAL_ACTION_BACK
+        )
         // Wait for the stock shade to leave the screen so the blur doesn't capture it
         handler.postDelayed({
             interceptPending = false
@@ -264,8 +272,12 @@ class ControlCenterController(private val service: AccessibilityService) {
             PixelFormat.TRANSLUCENT
         ).apply {
             // Cover the status bar area too, so the blur runs edge to edge like the real quick panel
-            fitInsetsTypes = 0
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                fitInsetsTypes = 0
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
         }
 
         try {
@@ -341,7 +353,7 @@ class ControlCenterController(private val service: AccessibilityService) {
             refreshState()
             resetIdle()
         },
-        onMediaOutput = { openSystem(Intent(Settings.Panel.ACTION_VOLUME)) },
+        onMediaOutput = { openSystem((if (Build.VERSION.SDK_INT >= 29) Intent(Settings.Panel.ACTION_VOLUME) else Intent(Settings.ACTION_SOUND_SETTINGS))) },
         onDeviceControl = { openSystem(Intent(Settings.ACTION_CAST_SETTINGS)) },
         onNotifOpen = { key ->
             dismiss()
@@ -357,7 +369,7 @@ class ControlCenterController(private val service: AccessibilityService) {
         },
         onNotifSettings = { openSystem(Intent("android.settings.NOTIFICATION_SETTINGS")) },
         onNotifAccess = { openSystem(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-        onWifi = { openSystem(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)) },
+        onWifi = { openSystem((if (Build.VERSION.SDK_INT >= 29) Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY) else Intent(Settings.ACTION_WIRELESS_SETTINGS))) },
         onBluetooth = { openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
         onToggle = { toggle(it) },
         onTile = { tile(it) },
@@ -435,7 +447,7 @@ class ControlCenterController(private val service: AccessibilityService) {
 
             // Android does not let apps switch these radios; open the matching system screen
             CcToggle.Airplane -> openSystem(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS))
-            CcToggle.Data -> openSystem(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY))
+            CcToggle.Data -> openSystem((if (Build.VERSION.SDK_INT >= 29) Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY) else Intent(Settings.ACTION_WIRELESS_SETTINGS)))
             CcToggle.Hotspot -> openSystem(Intent(Settings.ACTION_WIRELESS_SETTINGS))
             CcToggle.Location -> openSystem(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
         }

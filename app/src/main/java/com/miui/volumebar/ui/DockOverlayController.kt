@@ -1,5 +1,6 @@
 package com.miui.volumebar.ui
 
+import android.os.Build
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.SharedPreferences
@@ -140,7 +141,7 @@ class DockOverlayController(private val service: AccessibilityService) {
                     visible = visible.value,
                     onExited = { if (!visible.value) removeOverlay() },
                     backdropBitmap = backdrop.value,
-                    screenWidth = (windowManager.maximumWindowMetrics.bounds.width() /
+                    screenWidth = (screenWidthPx() /
                             service.resources.displayMetrics.density).dp
                 )
             }
@@ -170,6 +171,10 @@ class DockOverlayController(private val service: AccessibilityService) {
             lifecycleOwner = null
         }
     }
+
+    private fun screenWidthPx(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) windowManager.maximumWindowMetrics.bounds.width()
+        else service.resources.displayMetrics.widthPixels
 
     private fun removeOverlay() {
         overlayView?.let { view ->

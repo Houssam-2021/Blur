@@ -3,6 +3,7 @@ package com.miui.volumebar.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.RuntimeShader
+import androidx.annotation.RequiresApi
 import android.graphics.Shader
 import android.os.Build
 import androidx.compose.foundation.layout.Box
@@ -125,29 +126,23 @@ fun GlassSurface(
             }
         }
     }
-    val runtime = remember { if (Build.VERSION.SDK_INT >= 33) RuntimeShader(GLASS_SKSL) else null }
+    val runtime: Any? = remember { if (Build.VERSION.SDK_INT >= 33) GlassShader.create() else null }
 
     Box(
         modifier = modifier
             .onGloballyPositioned { topLeft = it.positionInWindow() }
             .drawBehind {
                 val radiusPx = cornerRadius.toPx()
-                if (runtime != null && photo != null && usable != null) {
+                if (Build.VERSION.SDK_INT >= 33 && runtime != null && photo != null && usable != null) {
                     view.getLocationOnScreen(loc)
-                    runtime.setInputShader("photo", photo)
-                    runtime.setFloatUniform("size", size.width, size.height)
-                    runtime.setFloatUniform("origin", loc[0] + topLeft.x, loc[1] + topLeft.y)
-                    runtime.setFloatUniform(
-                        "scale",
-                        usable.width / metrics.widthPixels.toFloat(),
-                        usable.height / metrics.heightPixels.toFloat()
+                    drawRect(
+                        GlassShader.brush(
+                            runtime, photo, size.width, size.height, loc[0] + topLeft.x, loc[1] + topLeft.y,
+                            usable.width / metrics.widthPixels.toFloat(),
+                            usable.height / metrics.heightPixels.toFloat(),
+                            radiusPx, bend.toPx(), haze, tint
+                        )
                     )
-                    runtime.setFloatUniform("radius", radiusPx)
-                    runtime.setFloatUniform("bend", bend.toPx())
-                    runtime.setFloatUniform("haze", haze)
-                    runtime.setFloatUniform("tint", tint.red, tint.green, tint.blue, tint.alpha)
-                    runtime.setFloatUniform("light", -0.6f, -0.8f)
-                    drawRect(ShaderBrush(runtime))
                 } else {
                     drawRoundRect(Color(0x66181A24), cornerRadius = CornerRadius(radiusPx))
                     drawRoundRect(
@@ -160,4 +155,27 @@ fun GlassSurface(
         contentAlignment = contentAlignment,
         content = content
     )
+}
+
+/** Everything that needs Android 13's RuntimeShader, kept in its own class so older versions never load it. */
+@RequiresApi(33)
+private object GlassShader {
+    fun create(): Any = RuntimeShader(GLASS_SKSL)
+
+    fun brush(
+        shader: Any, photo: Shader, width: Float, height: Float, originX: Float, originY: Float,
+        scaleX: Float, scaleY: Float, radius: Float, bend: Float, haze: Float, tint: Color
+    ): ShaderBrush {
+        val runtime = shader as RuntimeShader
+        runtime.setInputShader("photo", photo)
+        runtime.setFloatUniform("size", width, height)
+        runtime.setFloatUniform("origin", originX, originY)
+        runtime.setFloatUniform("scale", scaleX, scaleY)
+        runtime.setFloatUniform("radius", radius)
+        runtime.setFloatUniform("bend", bend)
+        runtime.setFloatUniform("haze", haze)
+        runtime.setFloatUniform("tint", tint.red, tint.green, tint.blue, tint.alpha)
+        runtime.setFloatUniform("light", -0.6f, -0.8f)
+        return ShaderBrush(runtime)
+    }
 }
