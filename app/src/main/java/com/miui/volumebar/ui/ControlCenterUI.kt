@@ -18,6 +18,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -134,19 +138,21 @@ fun ControlCenterUI(
     val bg = rememberBackdropProgress(visible, onExited)
     val image = remember(backdrop) { backdrop?.takeIf { !it.isRecycled }?.asImageBitmap() }
     var dragX by remember { mutableFloatStateOf(0f) }
+    var editing by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(Unit) { detectTapGestures { actions.onDismiss() } }
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { _, drag -> if (drag < -14f) actions.onDismiss() }
+            .pointerInput(editing) { detectTapGestures { if (!editing) actions.onDismiss() } }
+            .pointerInput(editing) {
+                detectVerticalDragGestures { _, drag -> if (!editing && drag < -14f) actions.onDismiss() }
             }
-            .pointerInput(page) {
+            .pointerInput(page, editing) {
                 // Swipe sideways between the notification panel and the control center
                 detectHorizontalDragGestures(
                     onDragStart = { dragX = 0f },
                     onDragEnd = {
+                        if (editing) dragX = 0f
                         if (dragX < -110f && page == CcPage.Notifications) actions.onPage(CcPage.ControlCenter)
                         if (dragX > 110f && page == CcPage.ControlCenter) actions.onPage(CcPage.Notifications)
                         dragX = 0f
@@ -180,7 +186,7 @@ fun ControlCenterUI(
             label = "shadePage"
         ) { target ->
             when (target) {
-                CcPage.ControlCenter -> ControlCenterPage(state, visible, backdrop, actions)
+                CcPage.ControlCenter -> ControlCenterPage(state, visible, backdrop, actions, editing, { editing = it })
                 CcPage.Notifications -> NotificationsPage(
                     state, notifications, notificationAccess, visible, backdrop, actions
                 )
@@ -191,18 +197,153 @@ fun ControlCenterUI(
 
 // ----- Control center page -----
 
+/** Which item is being dragged in edit mode, and how far the finger has moved it from its slot. */
+private class ReorderDrag {
+    var key by mutableStateOf<Any?>(null)
+    var offset by mutableStateOf(Offset.Zero)
+}
+
+/** In edit mode the item follows the finger; [onMove] reorders the list and [onEnd] saves it. */
+@Composable
+private fun Modifier.dragToReorder(
+    key: Any,
+    drag: ReorderDrag,
+    enabled: Boolean,
+    onMove: () -> Unit,
+    onEnd: () -> Unit
+): Modifier {
+    val move by rememberUpdatedState(onMove)
+    val end by rememberUpdatedState(onEnd)
+    return this
+        .then(
+            if (!enabled) Modifier else Modifier.pointerInput(key) {
+                detectDragGestures(
+                    onDragStart = { drag.key = key; drag.offset = Offset.Zero },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        drag.offset += amount
+                        move()
+                    },
+                    onDragEnd = { drag.key = null; drag.offset = Offset.Zero; end() },
+                    onDragCancel = { drag.key = null; drag.offset = Offset.Zero; end() }
+                )
+            }
+        )
+        .graphicsLayer {
+            if (drag.key == key) {
+                translationX = drag.offset.x
+                translationY = drag.offset.y
+                scaleX = 1.05f
+                scaleY = 1.05f
+            }
+        }
+        .zIndex(if (drag.key == key) 1f else 0f)
+}
+
+/** Moves [key] to the grid slot nearest to where the finger holds it. */
+private fun <T : Any> reorderInGrid(
+    list: MutableList<T>,
+    key: T,
+    drag: ReorderDrag,
+    slot: (Int) -> Offset,
+    cell: Offset
+) {
+    val from = list.indexOf(key)
+    if (from < 0) return
+    val held = slot(from) + drag.offset + cell / 2f
+    var best = from
+    var bestDistance = Float.MAX_VALUE
+    for (i in list.indices) {
+        val d = (slot(i) + cell / 2f - held).getDistanceSquared()
+        if (d < bestDistance) {
+            bestDistance = d
+            best = i
+        }
+    }
+    if (best != from) {
+        list.add(best, list.removeAt(from))
+        drag.offset += slot(from) - slot(best)
+    }
+}
+
+private fun blockGap(block: CcBlock, index: Int): Dp = when {
+    index == 0 -> 11.dp
+    block == CcBlock.Toggles -> 10.dp
+    block == CcBlock.Volume -> 15.dp
+    block == CcBlock.Brightness -> 17.dp
+    block == CcBlock.Shortcuts -> 13.dp
+    else -> 10.dp
+}
+
+/** The same actions with every button switched off, so a drag never presses anything. */
+private fun CcActions.inert() = CcActions(
+    onDismiss = onDismiss, onPage = onPage, onWifi = {}, onBluetooth = {}, onSound = {}, onToggle = {},
+    onTile = {}, onMedia = {}, onVolume = {}, onBrightness = {}, onSettings = {}, onPower = {},
+    onMediaOutput = {}, onDeviceControl = {}, onNotifOpen = {}, onNotifClear = {}, onClearAll = {},
+    onNotifSettings = {}, onNotifAccess = {}, onInteract = onInteract
+)
+
 @Composable
 private fun ControlCenterPage(
     state: CcUiState,
     visible: Boolean,
     backdrop: Bitmap?,
     actions: CcActions,
+    editing: Boolean,
+    onEditing: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     // Read when the panel opens, so a change made in Blurify's settings shows up the next time
-    val layout = remember { CcLayout.load(context) }
+    val blocks = remember { CcLayout.load(context).blocks.toMutableStateList() }
+    val toggles = remember { CcLayout.load(context).toggles.toMutableStateList() }
+    val tiles = remember { CcLayout.load(context).tiles.toMutableStateList() }
     val rows = (0 until 8).map { rememberSettleProgress(visible, 55L + 28L * it) }
+    val act = if (editing) remember(actions) { actions.inert() } else actions
+
+    val blockDrag = remember { ReorderDrag() }
+    val heights = remember { mutableStateMapOf<CcBlock, Float>() }
+    val gapPx = { block: CcBlock, i: Int -> with(density) { blockGap(block, i).toPx() } }
+    fun tops(): List<Float> {
+        var y = 0f
+        return blocks.mapIndexed { i, b ->
+            y += gapPx(b, i)
+            val top = y
+            y += heights[b] ?: 0f
+            top
+        }
+    }
+
+    fun moveBlock(block: CcBlock) {
+        while (true) {
+            val from = blocks.indexOf(block)
+            if (from < 0) return
+            val tops = tops()
+            val center = tops[from] + blockDrag.offset.y + (heights[block] ?: 0f) / 2f
+            val to = when {
+                from + 1 < blocks.size && center > tops[from + 1] + (heights[blocks[from + 1]] ?: 0f) / 2f -> from + 1
+                from > 0 && center < tops[from - 1] + (heights[blocks[from - 1]] ?: 0f) / 2f -> from - 1
+                else -> return
+            }
+            blocks.add(to, blocks.removeAt(from))
+            blockDrag.offset = blockDrag.offset.copy(y = blockDrag.offset.y + tops[from] - tops()[to])
+        }
+    }
+
+    fun save() {
+        CcLayout.blocks.saveVisible(context, blocks.toList())
+        CcLayout.toggles.saveVisible(context, toggles.toList())
+        CcLayout.tiles.saveVisible(context, tiles.toList())
+    }
+
+    // The panel closes on its own when nothing is touched; editing is not idle
+    LaunchedEffect(editing) {
+        while (editing) {
+            actions.onInteract()
+            delay(2500)
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -211,87 +352,201 @@ private fun ControlCenterPage(
                 .padding(start = 16.dp, end = 16.dp, top = 80.dp),
             verticalArrangement = Arrangement.Top
         ) {
-            Header(actions, Modifier.settle { rows[0].value }, full = true)
+            Header(
+                actions, Modifier.settle { rows[0].value }, full = true,
+                editing = editing,
+                onEdit = {
+                    if (editing) save()
+                    onEditing(!editing)
+                    actions.onInteract()
+                }
+            )
 
-            layout.blocks.forEachIndexed { i, block ->
-                val row = rows[(i + 1).coerceAtMost(7)]
-                Spacer(
-                    Modifier.height(
-                        when {
-                            i == 0 -> 11.dp
-                            block == CcBlock.Toggles -> 10.dp
-                            block == CcBlock.Volume -> 15.dp
-                            block == CcBlock.Brightness -> 17.dp
-                            block == CcBlock.Shortcuts -> 13.dp
-                            else -> 10.dp
-                        }
-                    )
-                )
-                when (block) {
-                    CcBlock.Connectivity -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            ConnectivityPill(
-                                backdrop = backdrop,
-                                icon = Icons.Rounded.Wifi,
-                                label = "Wi-Fi",
-                                sub = if (state.wifiOn) "Connected" else "Off",
-                                active = state.wifiOn,
-                                onClick = actions.onWifi,
-                                modifier = Modifier.settle { row.value }
+            blocks.forEachIndexed { i, block ->
+                key(block) {
+                    val row = rows[(i + 1).coerceAtMost(7)]
+                    Spacer(Modifier.height(blockGap(block, i)))
+                    Box(
+                        modifier = Modifier
+                            .onSizeChanged { heights[block] = it.height.toFloat() }
+                            .dragToReorder(
+                                key = block, drag = blockDrag, enabled = editing,
+                                onMove = { moveBlock(block) },
+                                onEnd = { CcLayout.blocks.saveVisible(context, blocks.toList()) }
                             )
-                            ConnectivityPill(
-                                backdrop = backdrop,
-                                icon = Icons.Rounded.Bluetooth,
-                                label = "Bluetooth",
-                                sub = if (state.bluetoothOn) "On" else "Off",
-                                active = state.bluetoothOn,
-                                onClick = actions.onBluetooth,
-                                modifier = Modifier.settle { row.value }
-                            )
-                        }
-                        MediaCard(
-                            backdrop = backdrop,
-                            playing = state.musicPlaying,
-                            actions = actions,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(158.dp)
-                                .settle { row.value }
-                        )
-                    }
-                    CcBlock.Toggles ->
-                        if (layout.toggles.isNotEmpty()) {
-                            ToggleCard(backdrop, state, actions, layout.toggles, Modifier.settle { row.value })
-                        }
-                    CcBlock.Volume -> GlassSlider(
-                        backdrop = backdrop,
-                        fraction = state.volume,
-                        icon = Icons.Rounded.MusicNote,
-                        onChange = actions.onVolume,
-                        onInteract = actions.onInteract,
-                        modifier = Modifier.settle { row.value }
-                    )
-                    CcBlock.Brightness -> GlassSlider(
-                        backdrop = backdrop,
-                        fraction = state.brightness,
-                        icon = Icons.Rounded.WbSunny,
-                        onChange = actions.onBrightness,
-                        onInteract = actions.onInteract,
-                        modifier = Modifier.settle { row.value }
-                    )
-                    CcBlock.Shortcuts -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        layout.tiles.chunked(2).forEach { pair ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                pair.forEach { tile ->
-                                    TilePill(tile, state, backdrop, actions, Modifier.weight(1f).settle { row.value })
+                    ) {
+                        when (block) {
+                            CcBlock.Connectivity -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    ConnectivityPill(
+                                        backdrop = backdrop,
+                                        icon = Icons.Rounded.Wifi,
+                                        label = "Wi-Fi",
+                                        sub = if (state.wifiOn) "Connected" else "Off",
+                                        active = state.wifiOn,
+                                        onClick = act.onWifi,
+                                        modifier = Modifier.settle { row.value }
+                                    )
+                                    ConnectivityPill(
+                                        backdrop = backdrop,
+                                        icon = Icons.Rounded.Bluetooth,
+                                        label = "Bluetooth",
+                                        sub = if (state.bluetoothOn) "On" else "Off",
+                                        active = state.bluetoothOn,
+                                        onClick = act.onBluetooth,
+                                        modifier = Modifier.settle { row.value }
+                                    )
                                 }
-                                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                MediaCard(
+                                    backdrop = backdrop,
+                                    playing = state.musicPlaying,
+                                    actions = act,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(158.dp)
+                                        .settle { row.value }
+                                )
+                            }
+                            CcBlock.Toggles ->
+                                if (toggles.isNotEmpty()) {
+                                    ToggleCard(
+                                        backdrop, state, act, toggles, Modifier.settle { row.value },
+                                        editing = editing,
+                                        onSaved = { CcLayout.toggles.saveVisible(context, toggles.toList()) }
+                                    )
+                                }
+                            CcBlock.Volume -> GlassSlider(
+                                backdrop = backdrop,
+                                fraction = state.volume,
+                                icon = Icons.Rounded.MusicNote,
+                                onChange = act.onVolume,
+                                onInteract = actions.onInteract,
+                                modifier = Modifier.settle { row.value },
+                                enabled = !editing
+                            )
+                            CcBlock.Brightness -> GlassSlider(
+                                backdrop = backdrop,
+                                fraction = state.brightness,
+                                icon = Icons.Rounded.WbSunny,
+                                onChange = act.onBrightness,
+                                onInteract = actions.onInteract,
+                                modifier = Modifier.settle { row.value },
+                                enabled = !editing
+                            )
+                            CcBlock.Shortcuts -> if (tiles.isNotEmpty()) {
+                                ShortcutGrid(
+                                    tiles, state, backdrop, act, { row.value },
+                                    editing = editing,
+                                    onSaved = { CcLayout.tiles.saveVisible(context, tiles.toList()) }
+                                )
+                            }
+                        }
+                        if (editing) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 6.dp, y = (-8).dp)
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF453A))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        blocks.remove(block)
+                                        CcLayout.blocks.saveVisible(context, blocks.toList())
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Remove, "Remove", tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
+                }
+            }
+        }
+
+        if (editing) {
+            val removed = CcBlock.values().filter { it !in blocks }
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (removed.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        removed.forEach { block ->
+                            Text(
+                                "+ ${block.label}",
+                                color = LabelColor,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0x80000000))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        blocks.add(block)
+                                        CcLayout.blocks.saveVisible(context, blocks.toList())
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp)
+                            )
+                        }
+                    }
+                }
+                Text("Drag items to move them. Tap the check when done.", color = SubColor, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+/** The shortcut tiles on a two column grid; each can be dragged to any other spot. */
+@Composable
+private fun ShortcutGrid(
+    tiles: SnapshotStateList<CcTile>,
+    state: CcUiState,
+    backdrop: Bitmap?,
+    actions: CcActions,
+    progress: () -> Float,
+    editing: Boolean,
+    onSaved: () -> Unit
+) {
+    val density = LocalDensity.current
+    val drag = remember { ReorderDrag() }
+    val gridRows = (tiles.size + 1) / 2
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cellW = (maxWidth - 8.dp) / 2
+        val cellWPx = with(density) { cellW.toPx() }
+        val cellHPx = with(density) { 75.dp.toPx() }
+        val stepX = with(density) { (cellW + 8.dp).toPx() }
+        val stepY = with(density) { 85.dp.toPx() }
+        fun slot(i: Int) = Offset((i % 2) * stepX, (i / 2) * stepY)
+        Box(Modifier.fillMaxWidth().height((gridRows * 75 + (gridRows - 1) * 10).dp)) {
+            tiles.toList().forEach { tile ->
+                key(tile) {
+                    TilePill(
+                        tile, state, backdrop, actions,
+                        Modifier
+                            .width(cellW)
+                            .offset { slot(tiles.indexOf(tile)).let { IntOffset(it.x.roundToInt(), it.y.roundToInt()) } }
+                            .dragToReorder(
+                                key = tile, drag = drag, enabled = editing,
+                                onMove = { reorderInGrid(tiles, tile, drag, ::slot, Offset(cellWPx, cellHPx)) },
+                                onEnd = onSaved
+                            )
+                            .settle(progress)
+                    )
                 }
             }
         }
@@ -640,7 +895,13 @@ private fun TextPill(text: String, backdrop: Bitmap?, onClick: () -> Unit, modif
 // ----- Shared pieces -----
 
 @Composable
-private fun Header(actions: CcActions, modifier: Modifier, full: Boolean) {
+private fun Header(
+    actions: CcActions,
+    modifier: Modifier,
+    full: Boolean,
+    editing: Boolean = false,
+    onEdit: () -> Unit = {}
+) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -669,7 +930,7 @@ private fun Header(actions: CcActions, modifier: Modifier, full: Boolean) {
         )
         Spacer(Modifier.weight(1f))
         if (full) {
-            HeaderIcon(Icons.Rounded.Edit, "Edit", actions.onInteract)
+            HeaderIcon(if (editing) Icons.Rounded.Check else Icons.Rounded.Edit, if (editing) "Done" else "Edit", onEdit)
             Spacer(Modifier.width(18.dp))
             HeaderIcon(Icons.Rounded.PowerSettingsNew, "Power", actions.onPower)
             Spacer(Modifier.width(18.dp))
@@ -825,12 +1086,16 @@ private fun ToggleCard(
     backdrop: Bitmap?,
     state: CcUiState,
     actions: CcActions,
-    toggles: List<CcToggle>,
-    modifier: Modifier
+    toggles: SnapshotStateList<CcToggle>,
+    modifier: Modifier,
+    editing: Boolean,
+    onSaved: () -> Unit
 ) {
-    val toggleRows = toggles.chunked(4)
+    val density = LocalDensity.current
+    val drag = remember { ReorderDrag() }
+    val toggleRows = (toggles.size + 3) / 4
     // Two rows give the original 155dp card; every row adds 65dp
-    val cardHeight = (43 + toggleRows.size * 47 + (toggleRows.size - 1) * 18).dp
+    val cardHeight = (43 + toggleRows * 47 + (toggleRows - 1) * 18).dp
     GlassSurface(
         backdrop = backdrop,
         cornerRadius = 32.dp,
@@ -842,23 +1107,29 @@ private fun ToggleCard(
             .height(cardHeight)
             .pointerInput(Unit) { detectTapGestures { actions.onInteract() } }
     ) {
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 30.dp)
-                .padding(top = 21.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+                .padding(top = 21.dp)
         ) {
-            toggleRows.forEach { rowItems ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    for (slot in 0 until 4) {
-                        val t = rowItems.getOrNull(slot)
-                        if (t != null) {
-                            val (icon, on) = toggleLook(t, state)
-                            Toggle(icon, on) { actions.onToggle(t) }
-                        } else {
-                            Spacer(Modifier.size(47.dp))
-                        }
+            val cellPx = with(density) { 47.dp.toPx() }
+            val stepX = with(density) { ((maxWidth - 47.dp) / 3).toPx() }
+            val stepY = with(density) { 65.dp.toPx() }
+            fun slot(i: Int) = Offset((i % 4) * stepX, (i / 4) * stepY)
+            toggles.toList().forEach { t ->
+                key(t) {
+                    val (icon, on) = toggleLook(t, state)
+                    Box(
+                        Modifier
+                            .offset { slot(toggles.indexOf(t)).let { IntOffset(it.x.roundToInt(), it.y.roundToInt()) } }
+                            .dragToReorder(
+                                key = t, drag = drag, enabled = editing,
+                                onMove = { reorderInGrid(toggles, t, drag, ::slot, Offset(cellPx, cellPx)) },
+                                onEnd = onSaved
+                            )
+                    ) {
+                        Toggle(icon, on) { actions.onToggle(t) }
                     }
                 }
             }
@@ -913,7 +1184,8 @@ private fun GlassSlider(
     onInteract: () -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = 65.dp,
-    showMenu: Boolean = false
+    showMenu: Boolean = false,
+    enabled: Boolean = true
 ) {
     var widthPx by remember { mutableFloatStateOf(1f) }
     var dragging by remember { mutableStateOf(false) }
@@ -943,21 +1215,24 @@ private fun GlassSlider(
             .fillMaxWidth()
             .height(height)
             .onSizeChanged { widthPx = it.width.toFloat() }
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    dragging = true
-                    update(offset.x)
-                    dragging = false
-                }
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset -> dragging = true; update(offset.x) },
-                    onDrag = { change, _ -> change.consume(); update(change.position.x) },
-                    onDragEnd = { dragging = false },
-                    onDragCancel = { dragging = false }
-                )
-            }
+            .then(
+                if (!enabled) Modifier else Modifier
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            dragging = true
+                            update(offset.x)
+                            dragging = false
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = { offset -> dragging = true; update(offset.x) },
+                            onDrag = { change, _ -> change.consume(); update(change.position.x) },
+                            onDragEnd = { dragging = false },
+                            onDragCancel = { dragging = false }
+                        )
+                    }
+            )
     ) {
         // The white fill grows from the left; it never gets narrower than its own round cap
         val fillWidth = with(density) { max(shown * widthPx, height.toPx()).toDp() }

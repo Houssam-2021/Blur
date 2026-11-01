@@ -41,6 +41,12 @@ class CcGroup<T : Enum<T>>(private val key: String, private val all: List<T>) {
             .apply()
     }
 
+    /** Saves what the control center itself shows, in its order; everything else becomes hidden. */
+    fun saveVisible(c: Context, visible: List<T>) {
+        val rest = order(c).filter { it !in visible }
+        save(c, visible + rest, rest.toSet() + all.filter { it !in visible })
+    }
+
     fun reset(c: Context) {
         prefs(c).edit().remove("$key.order").remove("$key.hidden").apply()
     }
