@@ -22,6 +22,7 @@ import com.miui.volumebar.setup.CustomizeScreen
 import com.miui.volumebar.setup.HomeScreen
 import com.miui.volumebar.setup.Permissions
 import com.miui.volumebar.setup.SettingsScreen
+import com.miui.volumebar.util.LookStore
 import com.miui.volumebar.setup.SetupActions
 import com.miui.volumebar.setup.SetupWizard
 import com.miui.volumebar.ui.ControlCenterController
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
                 var setupDone by remember { mutableStateOf(prefs.getBoolean("setup_done", false)) }
                 var controlCenterOn by remember { mutableStateOf(ControlCenterController.enabled(this)) }
                 var dockOn by remember { mutableStateOf(DockStore.enabled(this)) }
+                var liquidLook by remember { mutableStateOf(LookStore.liquid(this)) }
                 var showSettings by remember { mutableStateOf(false) }
                 var showCustomize by remember { mutableStateOf(false) }
 
@@ -90,6 +92,11 @@ class MainActivity : ComponentActivity() {
                         CustomizeScreen(onBack = { showCustomize = false })
                     } else if (showSettings) {
                         SettingsScreen(
+                            liquidLook = liquidLook,
+                            onLook = {
+                                liquidLook = it
+                                LookStore.setLiquid(this, it)
+                            },
                             controlCenterOn = controlCenterOn,
                             controlCenterSupported = ControlCenterController.supported(),
                             dockOn = dockOn,

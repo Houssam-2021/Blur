@@ -6,6 +6,14 @@ import androidx.compose.ui.platform.LocalContext
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateIntOffsetAsState
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -201,40 +209,77 @@ fun ControlCenterUI(
 private class ReorderDrag {
     var key by mutableStateOf<Any?>(null)
     var offset by mutableStateOf(Offset.Zero)
+    /** True while the dropped item eases into its slot. */
+    var releasing by mutableStateOf(false)
+    var job: Job? = null
 }
 
-/** In edit mode the item follows the finger; [onMove] reorders the list and [onEnd] saves it. */
+private val ReorderSpring = spring<Float>(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+private val ReorderOffsetSpring = spring<IntOffset>(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+
+/**
+ * Touch and hold, then the item lifts and follows the finger; [onMove] reorders the list and [onEnd]
+ * saves it. [shrink] makes the item a little smaller while the panel is in edit mode.
+ */
 @Composable
 private fun Modifier.dragToReorder(
     key: Any,
     drag: ReorderDrag,
     enabled: Boolean,
     onMove: () -> Unit,
-    onEnd: () -> Unit
+    onEnd: () -> Unit,
+    shrink: Float = 0f
 ): Modifier {
     val move by rememberUpdatedState(onMove)
     val end by rememberUpdatedState(onEnd)
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val editT by animateFloatAsState(if (enabled) 1f else 0f, ReorderSpring, label = "editShrink")
+    val lift by animateFloatAsState(
+        if (drag.key == key && !drag.releasing) 1f else 0f,
+        spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "dragLift"
+    )
+    fun release() {
+        end()
+        drag.releasing = true
+        drag.job = scope.launch {
+            animate(
+                Offset.VectorConverter, drag.offset, Offset.Zero,
+                animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
+            ) { value, _ -> drag.offset = value }
+            drag.key = null
+            drag.releasing = false
+        }
+    }
     return this
         .then(
             if (!enabled) Modifier else Modifier.pointerInput(key) {
-                detectDragGestures(
-                    onDragStart = { drag.key = key; drag.offset = Offset.Zero },
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        drag.job?.cancel()
+                        drag.releasing = false
+                        drag.key = key
+                        drag.offset = Offset.Zero
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    },
                     onDrag = { change, amount ->
                         change.consume()
                         drag.offset += amount
                         move()
                     },
-                    onDragEnd = { drag.key = null; drag.offset = Offset.Zero; end() },
-                    onDragCancel = { drag.key = null; drag.offset = Offset.Zero; end() }
+                    onDragEnd = { release() },
+                    onDragCancel = { release() }
                 )
             }
         )
         .graphicsLayer {
+            val s = 1f - shrink * editT + 0.06f * lift
+            scaleX = s
+            scaleY = s
             if (drag.key == key) {
                 translationX = drag.offset.x
                 translationY = drag.offset.y
-                scaleX = 1.05f
-                scaleY = 1.05f
             }
         }
         .zIndex(if (drag.key == key) 1f else 0f)
@@ -315,6 +360,11 @@ private fun ControlCenterPage(
         }
     }
 
+    // The blocks that make way glide into their new places instead of jumping
+    val scope = rememberCoroutineScope()
+    val shifts = remember { mutableStateMapOf<CcBlock, Animatable<Float, AnimationVector1D>>() }
+    fun shiftOf(block: CcBlock) = shifts.getOrPut(block) { Animatable(0f) }
+
     fun moveBlock(block: CcBlock) {
         while (true) {
             val from = blocks.indexOf(block)
@@ -326,8 +376,20 @@ private fun ControlCenterPage(
                 from > 0 && center < tops[from - 1] + (heights[blocks[from - 1]] ?: 0f) / 2f -> from - 1
                 else -> return
             }
+            val before = blocks.zip(tops).toMap()
             blocks.add(to, blocks.removeAt(from))
-            blockDrag.offset = blockDrag.offset.copy(y = blockDrag.offset.y + tops[from] - tops()[to])
+            val after = blocks.zip(tops()).toMap()
+            blockDrag.offset = blockDrag.offset.copy(y = blockDrag.offset.y + tops[from] - after.getValue(block))
+            blocks.filter { it != block }.forEach { other ->
+                val moved = before.getValue(other) - after.getValue(other)
+                if (moved != 0f) {
+                    val shift = shiftOf(other)
+                    scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        shift.snapTo(shift.value + moved)
+                        shift.animateTo(0f, ReorderSpring)
+                    }
+                }
+            }
         }
     }
 
@@ -369,10 +431,12 @@ private fun ControlCenterPage(
                     Box(
                         modifier = Modifier
                             .onSizeChanged { heights[block] = it.height.toFloat() }
+                            .graphicsLayer { translationY = shifts[block]?.value ?: 0f }
                             .dragToReorder(
                                 key = block, drag = blockDrag, enabled = editing,
                                 onMove = { moveBlock(block) },
-                                onEnd = { CcLayout.blocks.saveVisible(context, blocks.toList()) }
+                                onEnd = { CcLayout.blocks.saveVisible(context, blocks.toList()) },
+                                shrink = 0.03f
                             )
                     ) {
                         when (block) {
@@ -447,11 +511,11 @@ private fun ControlCenterPage(
                         if (editing) {
                             Box(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 6.dp, y = (-8).dp)
-                                    .size(26.dp)
+                                    .align(Alignment.TopStart)
+                                    .offset(x = (-4).dp, y = (-6).dp)
+                                    .size(24.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFF453A))
+                                    .background(Color.White)
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null
@@ -461,7 +525,7 @@ private fun ControlCenterPage(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Rounded.Remove, "Remove", tint = Color.White, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Rounded.Remove, "Remove", tint = OnCircle, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -505,7 +569,7 @@ private fun ControlCenterPage(
                         }
                     }
                 }
-                Text("Drag items to move them. Tap the check when done.", color = SubColor, fontSize = 12.sp)
+                Text("Touch and hold to change order.", color = SubColor, fontSize = 12.sp)
             }
         }
     }
@@ -535,11 +599,13 @@ private fun ShortcutGrid(
         Box(Modifier.fillMaxWidth().height((gridRows * 75 + (gridRows - 1) * 10).dp)) {
             tiles.toList().forEach { tile ->
                 key(tile) {
+                    val target = slot(tiles.indexOf(tile)).let { IntOffset(it.x.roundToInt(), it.y.roundToInt()) }
+                    val glide by animateIntOffsetAsState(target, ReorderOffsetSpring, label = "tileGlide")
                     TilePill(
                         tile, state, backdrop, actions,
                         Modifier
                             .width(cellW)
-                            .offset { slot(tiles.indexOf(tile)).let { IntOffset(it.x.roundToInt(), it.y.roundToInt()) } }
+                            .offset { if (drag.key == tile) target else glide }
                             .dragToReorder(
                                 key = tile, drag = drag, enabled = editing,
                                 onMove = { reorderInGrid(tiles, tile, drag, ::slot, Offset(cellWPx, cellHPx)) },
@@ -909,6 +975,30 @@ private fun Header(
             delay(1000)
         }
     }
+    if (editing) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(38.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Rounded.Settings, null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Panel settings", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Done",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onEdit)
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            )
+        }
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -930,7 +1020,7 @@ private fun Header(
         )
         Spacer(Modifier.weight(1f))
         if (full) {
-            HeaderIcon(if (editing) Icons.Rounded.Check else Icons.Rounded.Edit, if (editing) "Done" else "Edit", onEdit)
+            HeaderIcon(Icons.Rounded.Edit, "Edit", onEdit)
             Spacer(Modifier.width(18.dp))
             HeaderIcon(Icons.Rounded.PowerSettingsNew, "Power", actions.onPower)
             Spacer(Modifier.width(18.dp))
@@ -1120,9 +1210,11 @@ private fun ToggleCard(
             toggles.toList().forEach { t ->
                 key(t) {
                     val (icon, on) = toggleLook(t, state)
+                    val target = slot(toggles.indexOf(t)).let { IntOffset(it.x.roundToInt(), it.y.roundToInt()) }
+                    val glide by animateIntOffsetAsState(target, ReorderOffsetSpring, label = "toggleGlide")
                     Box(
                         Modifier
-                            .offset { slot(toggles.indexOf(t)).let { IntOffset(it.x.roundToInt(), it.y.roundToInt()) } }
+                            .offset { if (drag.key == t) target else glide }
                             .dragToReorder(
                                 key = t, drag = drag, enabled = editing,
                                 onMove = { reorderInGrid(toggles, t, drag, ::slot, Offset(cellPx, cellPx)) },

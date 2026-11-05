@@ -17,6 +17,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -385,6 +386,8 @@ fun HomeScreen(
 
 @Composable
 fun SettingsScreen(
+    liquidLook: Boolean,
+    onLook: (Boolean) -> Unit,
     controlCenterOn: Boolean,
     controlCenterSupported: Boolean,
     dockOn: Boolean,
@@ -417,6 +420,22 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(24.dp))
+            SectionTitle("Look of the volume bar")
+            Spacer(Modifier.height(10.dp))
+            Row(modifier = Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LookChoice(
+                    title = "Blurify", subtitle = "The default look",
+                    selected = !liquidLook, liquid = false,
+                    onClick = { onLook(false) }, modifier = Modifier.weight(1f)
+                )
+                LookChoice(
+                    title = "Liquid glass", subtitle = "Smoky glass, best on Android 13+",
+                    selected = liquidLook, liquid = true,
+                    onClick = { onLook(true) }, modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
             SectionTitle("Extras")
             Spacer(Modifier.height(10.dp))
             SwitchRow(
@@ -467,6 +486,50 @@ fun SettingsScreen(
 }
 
 // ----- Pieces -----
+
+/** One of the two looks, with a tiny preview of the bar in that look. */
+@Composable
+private fun LookChoice(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    liquid: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(shape)
+            .background(Card)
+            .border(2.dp, if (selected) Accent else Color.Transparent, shape)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 36.dp, height = 100.dp)
+                .clip(RoundedCornerShape(if (liquid) 18.dp else 12.dp))
+                .background(
+                    if (liquid) Brush.verticalGradient(listOf(Color(0xFFA6A09A), Color(0xFF7E7873)))
+                    else Brush.verticalGradient(listOf(Color(0xFF3A4260), Color(0xFF2A3050)))
+                )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.55f)
+                    .align(Alignment.BottomCenter)
+                    .background(Color.White)
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(title, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(subtitle, color = TextSub, fontSize = 12.sp, textAlign = TextAlign.Center)
+    }
+}
 
 @Composable
 private fun IconBadge(icon: ImageVector, size: Int, good: Boolean = false) {

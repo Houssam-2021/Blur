@@ -68,6 +68,19 @@ class VolumeAccessibilityService : AccessibilityService() {
         controlCenter = ControlCenterController(this).also { it.start() }
         lockNotifications = LockNotificationsController(this)
         instance = this
+        // Debug builds only: lets a test script show the volume bar without pressing a key
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            ContextCompat.registerReceiver(
+                this,
+                object : BroadcastReceiver() {
+                    override fun onReceive(context: Context, intent: Intent) {
+                        overlayController.stepVolume(intent.getBooleanExtra("up", true))
+                    }
+                },
+                IntentFilter("com.miui.volumebar.DEBUG_VOLUME"),
+                ContextCompat.RECEIVER_EXPORTED
+            )
+        }
         ContextCompat.registerReceiver(
             this,
             screenReceiver,

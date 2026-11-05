@@ -29,6 +29,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.miui.volumebar.util.BlurHelper
+import com.miui.volumebar.util.LookStore
 import com.miui.volumebar.util.ScreenshotApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,8 @@ class VolumeOverlayController(
     private var lifecycleOwner: OverlayLifecycleOwner? = null
     private var dismissRunnable: Runnable? = null
     private var isCapturingScreenshot = false
+    // Read when the bar opens, so a change in Blurify's settings shows up the next time
+    private var liquidLook = false
 
     private val stream = AudioManager.STREAM_MUSIC
 
@@ -218,6 +221,7 @@ class VolumeOverlayController(
     // ----- Overlay window -----
 
     private fun showOverlay() {
+        liquidLook = LookStore.liquid(service)
         val owner = OverlayLifecycleOwner()
         owner.onCreate()
         lifecycleOwner = owner
@@ -246,6 +250,7 @@ class VolumeOverlayController(
                     visible = overlayVisible.value,
                     onExited = { if (!overlayVisible.value) removeOverlay() },
                     backdropBitmap = backdropBitmap.value,
+                    liquid = liquidLook,
                     onVolumeChange = { frac ->
                         setVolumeFromSlider(frac)
                         resetDismissTimer()
@@ -328,7 +333,11 @@ class VolumeOverlayController(
         ScreenshotApi.take(service) { shot ->
             try {
                 // Blur the whole screen once; each UI element draws only the region directly behind itself.
-                if (shot != null) backdropBitmap.value = BlurHelper.fastBlur(shot, 0.25f, 12)
+                // Liquid glass bends the real scene, so it gets a sharper, larger copy than the frosted look
+                if (shot != null) {
+                    backdropBitmap.value =
+                        if (liquidLook) BlurHelper.fastBlur(shot, 0.5f, 2) else BlurHelper.fastBlur(shot, 0.25f, 12)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {

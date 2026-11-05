@@ -69,6 +69,8 @@ private val SliderShape = RoundedCornerShape(20.dp)
 private val ButtonShape = RoundedCornerShape(50) // capsule
 private val PanelShape = RoundedCornerShape(30.dp)
 private val PillShape = RoundedCornerShape(18.dp)
+private val LiquidShape = RoundedCornerShape(50)
+private val LiquidIcon = Color(0xFFA2A2A7)
 
 private val Accent = Color(0xFF2B72EE)
 private val IconOnFill = Color(0xFF55555C)
@@ -98,7 +100,8 @@ fun VolumeOverlayUI(
     onRingerTimer: (Int) -> Unit,
     onDndTimer: (Int) -> Unit,
     onInteract: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    liquid: Boolean = false // the second look; Blurify's own look when false
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -119,6 +122,7 @@ fun VolumeOverlayUI(
                 ringerMode = ringerMode,
                 isDndOn = isDndOn,
                 backdropBitmap = backdropBitmap,
+                liquid = liquid,
                 onStreamVolumeChange = onStreamVolumeChange,
                 onToggleRinger = onToggleRinger,
                 onToggleDnd = onToggleDnd,
@@ -133,6 +137,7 @@ fun VolumeOverlayUI(
                 ringerMode = ringerMode,
                 isDndOn = isDndOn,
                 backdropBitmap = backdropBitmap,
+                liquid = liquid,
                 onVolumeChange = onVolumeChange,
                 onToggleRinger = onToggleRinger,
                 onToggleDnd = onToggleDnd,
@@ -154,6 +159,7 @@ private fun CompactBar(
     ringerMode: Int,
     isDndOn: Boolean,
     backdropBitmap: Bitmap?,
+    liquid: Boolean,
     onVolumeChange: (Float) -> Unit,
     onToggleRinger: () -> Unit,
     onToggleDnd: () -> Unit,
@@ -199,7 +205,7 @@ private fun CompactBar(
                 .width(CONTROL_WIDTH)
                 .height(SLIDER_HEIGHT)
                 .elasticEntrance({ sliderProgress.value }, slidePx, origin)
-                .clip(SliderShape)
+                .clip(if (liquid) LiquidShape else SliderShape)
                 .onSizeChanged { sliderHeightPx = it.height.toFloat() }
                 .pointerInput(Unit) {
                     detectDragGestures(
@@ -224,25 +230,35 @@ private fun CompactBar(
                     )
                 }
         ) {
-            // Only the screen area directly behind the bar is blurred
-            FrostedBackdrop(
-                bitmap = backdropBitmap,
-                windowOffsetX = OUTER_PAD,
-                windowOffsetY = OUTER_PAD,
-                tint = Color(0x401C2236),
-                fallback = Color(0xB0262B40),
-                modifier = Modifier.matchParentSize()
-            )
-            // Slightly darker toward the top, like the reference
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0x33101828), Color(0x00101828))
+            if (liquid) {
+                // Liquid glass: the glass and the white fill are drawn together
+                LiquidGlassPill(
+                    backdrop = backdropBitmap,
+                    cornerRadius = CONTROL_WIDTH / 2,
+                    fill = animatedFraction,
+                    modifier = Modifier.matchParentSize()
+                )
+            } else {
+                // Only the screen area directly behind the bar is blurred
+                FrostedBackdrop(
+                    bitmap = backdropBitmap,
+                    windowOffsetX = OUTER_PAD,
+                    windowOffsetY = OUTER_PAD,
+                    tint = Color(0x401C2236),
+                    fallback = Color(0xB0262B40),
+                    modifier = Modifier.matchParentSize()
+                )
+                // Slightly darker toward the top, like the reference
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0x33101828), Color(0x00101828))
+                            )
                         )
-                    )
-            )
+                )
+            }
 
             // Top three dots: tap to open the full panel
             Box(
@@ -256,7 +272,7 @@ private fun CompactBar(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!liquid) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     repeat(3) {
                         Box(
                             modifier = Modifier
@@ -271,7 +287,7 @@ private fun CompactBar(
             val fillFraction = animatedFraction.coerceIn(0f, 1f)
 
             // Plain rect: the track's rounded clip gives the fill its rounded bottom corners.
-            Box(
+            if (!liquid) Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(fillFraction)
@@ -288,11 +304,11 @@ private fun CompactBar(
             Icon(
                 imageVector = iconVector,
                 contentDescription = "Volume Icon",
-                tint = if (fillFraction > 0.12f) Accent else Color.White,
+                tint = if (fillFraction > 0.12f) (if (liquid) LiquidIcon else Accent) else Color.White,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 9.dp) // keeps the icon's center where it was, 22dp up
-                    .size(26.dp)
+                    .padding(bottom = if (liquid) 10.dp else 9.dp) // keeps the icon's center where it was
+                    .size(if (liquid) 24.dp else 26.dp)
             )
         }
 
@@ -301,6 +317,7 @@ private fun CompactBar(
         // 2. Ringer mode capsule (bell)
         GlassButton(
             backdropBitmap = backdropBitmap,
+            liquid = liquid,
             windowOffsetY = OUTER_PAD + SLIDER_HEIGHT + SLIDER_BUTTON_GAP,
             enterProgress = { ringerProgress.value },
             slidePx = slidePx,
@@ -320,6 +337,7 @@ private fun CompactBar(
         // 3. Do Not Disturb capsule (moon)
         GlassButton(
             backdropBitmap = backdropBitmap,
+            liquid = liquid,
             windowOffsetY = OUTER_PAD + SLIDER_HEIGHT + SLIDER_BUTTON_GAP + BUTTON_HEIGHT + BUTTON_GAP,
             enterProgress = { dndProgress.value },
             slidePx = slidePx,
@@ -345,6 +363,7 @@ private fun ExpandedPanel(
     ringerMode: Int,
     isDndOn: Boolean,
     backdropBitmap: Bitmap?,
+    liquid: Boolean,
     onStreamVolumeChange: (Int, Float) -> Unit,
     onToggleRinger: () -> Unit,
     onToggleDnd: () -> Unit,
@@ -363,14 +382,24 @@ private fun ExpandedPanel(
             .border(1.dp, Color(0x40FFFFFF), PanelShape)
     ) {
         // One frosted panel; the controls on it are just translucent tints.
-        FrostedBackdrop(
-            bitmap = backdropBitmap,
-            windowOffsetX = OUTER_PAD,
-            windowOffsetY = OUTER_PAD,
-            tint = Color(0x4D1E1618),
-            fallback = Color(0xB0382C30),
-            modifier = Modifier.matchParentSize()
-        )
+        if (liquid) {
+            LiquidGlassPill(
+                backdrop = backdropBitmap,
+                cornerRadius = 30.dp,
+                fill = 0f,
+                calm = 0.7f,
+                modifier = Modifier.matchParentSize()
+            )
+        } else {
+            FrostedBackdrop(
+                bitmap = backdropBitmap,
+                windowOffsetX = OUTER_PAD,
+                windowOffsetY = OUTER_PAD,
+                tint = Color(0x4D1E1618),
+                fallback = Color(0xB0382C30),
+                modifier = Modifier.matchParentSize()
+            )
+        }
 
         Column(
             modifier = Modifier.padding(PANEL_PAD),
@@ -381,6 +410,8 @@ private fun ExpandedPanel(
                     VerticalPill(
                         fraction = streamFractions.getOrElse(index) { 0f },
                         icon = icon,
+                        liquid = liquid,
+                        backdropBitmap = backdropBitmap,
                         onChange = { onStreamVolumeChange(index, it) },
                         onInteract = onInteract
                     )
@@ -424,6 +455,8 @@ private fun ExpandedPanel(
 private fun VerticalPill(
     fraction: Float,
     icon: ImageVector,
+    liquid: Boolean,
+    backdropBitmap: Bitmap?,
     onChange: (Float) -> Unit,
     onInteract: () -> Unit
 ) {
@@ -453,8 +486,8 @@ private fun VerticalPill(
         modifier = Modifier
             .width(PILL_WIDTH)
             .height(PILL_HEIGHT)
-            .clip(SliderShape)
-            .background(Color(0x66000000))
+            .clip(if (liquid) LiquidShape else SliderShape)
+            .then(if (liquid) Modifier else Modifier.background(Color(0x66000000)))
             .onSizeChanged { heightPx = it.height.toFloat() }
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
@@ -478,18 +511,28 @@ private fun VerticalPill(
                 )
             }
     ) {
-        // Plain rect: the clip rounds the bottom corners of the fill.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(fill)
-                .align(Alignment.BottomCenter)
-                .background(Color(0xF5FFFFFF))
-        )
+        if (liquid) {
+            LiquidGlassPill(
+                backdrop = backdropBitmap,
+                cornerRadius = PILL_WIDTH / 2,
+                fill = fill,
+                calm = 1f,
+                modifier = Modifier.matchParentSize()
+            )
+        } else {
+            // Plain rect: the clip rounds the bottom corners of the fill.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(fill)
+                    .align(Alignment.BottomCenter)
+                    .background(Color(0xF5FFFFFF))
+            )
+        }
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (fill > 0.2f) IconOnFill else Color(0xE6FFFFFF),
+            tint = if (fill > 0.2f) (if (liquid) LiquidIcon else IconOnFill) else Color(0xE6FFFFFF),
             modifier = Modifier
                 .size(26.dp)
                 .align(Alignment.BottomCenter)
@@ -615,6 +658,7 @@ private fun ringerIcon(ringerMode: Int): ImageVector = when (ringerMode) {
 @Composable
 private fun GlassButton(
     backdropBitmap: Bitmap?,
+    liquid: Boolean,
     windowOffsetY: Dp,
     enterProgress: () -> Float,
     slidePx: Float,
@@ -647,14 +691,23 @@ private fun GlassButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        FrostedBackdrop(
-            bitmap = backdropBitmap,
-            windowOffsetX = OUTER_PAD,
-            windowOffsetY = windowOffsetY,
-            tint = Color(0xD9707070), // mostly opaque gray capsule, as in the reference
-            fallback = Color(0xE6707070),
-            modifier = Modifier.matchParentSize()
-        )
+        if (liquid) {
+            LiquidGlassPill(
+                backdrop = backdropBitmap,
+                cornerRadius = BUTTON_HEIGHT / 2,
+                fill = 0f,
+                modifier = Modifier.matchParentSize()
+            )
+        } else {
+            FrostedBackdrop(
+                bitmap = backdropBitmap,
+                windowOffsetX = OUTER_PAD,
+                windowOffsetY = windowOffsetY,
+                tint = Color(0xD9707070), // mostly opaque gray capsule, as in the reference
+                fallback = Color(0xE6707070),
+                modifier = Modifier.matchParentSize()
+            )
+        }
         content()
     }
 }
