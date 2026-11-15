@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Liquid glass, ported from the glass clock's shader: clear in the middle, bending like a lens
+ * Glass, ported from the glass clock's shader: clear in the middle, bending like a lens
  * near the edges (it pulls in what lies just outside the rim), a milky haze, a soft bevel, and a
  * thin bright outline that catches a light from the top-left. Instead of the clock's bitmap masks it
  * takes the shape as a rounded rectangle, so it works for any tile, pill or card.
@@ -99,7 +99,7 @@ private const val GLASS_SKSL = """
 """
 
 /**
- * A liquid glass surface. [backdrop] is the blurred screenshot of the whole display. Falls back to a
+ * A glass surface. [backdrop] is the blurred screenshot of the whole display. Falls back to a
  * plain translucent rounded rectangle before Android 13 or while the backdrop is not ready.
  */
 @Composable

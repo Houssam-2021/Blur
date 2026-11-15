@@ -396,6 +396,7 @@ fun SettingsScreen(
     onTryControlCenter: () -> Unit,
     onCustomize: () -> Unit,
     onRunSetupAgain: () -> Unit,
+    onLicenses: () -> Unit,
     onBack: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize().background(Bg)) {
@@ -425,12 +426,12 @@ fun SettingsScreen(
             Row(modifier = Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 LookChoice(
                     title = "Blurify", subtitle = "The default look",
-                    selected = !liquidLook, liquid = false,
+                    selected = !liquidLook, style = 0,
                     onClick = { onLook(false) }, modifier = Modifier.weight(1f)
                 )
                 LookChoice(
-                    title = "Liquid glass", subtitle = "Smoky glass, best on Android 13+",
-                    selected = liquidLook, liquid = true,
+                    title = "Glass", subtitle = "Clear glass, turns thin when you hold the button",
+                    selected = liquidLook, style = 1,
                     onClick = { onLook(true) }, modifier = Modifier.weight(1f)
                 )
             }
@@ -480,6 +481,23 @@ fun SettingsScreen(
                     Text("Walk through the steps from the start", color = TextSub, fontSize = 13.sp)
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Card)
+                    .clickable { onLicenses() }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconBadge(Icons.Rounded.Info, 44)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Licenses and credits", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Who made Blurify and what it is built with", color = TextSub, fontSize = 13.sp)
+                }
+            }
             Spacer(Modifier.height(30.dp))
         }
     }
@@ -493,10 +511,11 @@ private fun LookChoice(
     title: String,
     subtitle: String,
     selected: Boolean,
-    liquid: Boolean,
+    style: Int, // 0 Blurify, 1 glass, 2 slim
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val liquid = style == 1
     val shape = RoundedCornerShape(18.dp)
     Column(
         modifier = modifier
@@ -510,10 +529,11 @@ private fun LookChoice(
     ) {
         Box(
             modifier = Modifier
-                .size(width = 36.dp, height = 100.dp)
-                .clip(RoundedCornerShape(if (liquid) 18.dp else 12.dp))
+                .size(width = if (style == 2) 12.dp else 36.dp, height = 100.dp)
+                .clip(RoundedCornerShape(if (liquid || style == 2) 18.dp else 12.dp))
                 .background(
-                    if (liquid) Brush.verticalGradient(listOf(Color(0xFFA6A09A), Color(0xFF7E7873)))
+                    if (style == 2) Brush.verticalGradient(listOf(Color(0xFFB4B4B8), Color(0xFFB4B4B8)))
+                    else if (liquid) Brush.verticalGradient(listOf(Color(0xFFA6A09A), Color(0xFF7E7873)))
                     else Brush.verticalGradient(listOf(Color(0xFF3A4260), Color(0xFF2A3050)))
                 )
         ) {
@@ -655,6 +675,96 @@ private fun PermissionRow(icon: ImageVector, title: String, subtitle: String, gr
             Text("Allow", color = Accent, fontWeight = FontWeight.Bold, fontSize = 15.sp,
                 modifier = Modifier.clickable { onFix() }.padding(8.dp))
         }
+    }
+}
+
+// ----- Licenses and credits -----
+
+private val OpenSourceParts = listOf(
+    "Jetpack Compose (UI, Foundation, Animation, Material 3)" to "Google",
+    "Material Icons" to "Google",
+    "AndroidX Core, Activity and Lifecycle" to "Google",
+    "Kotlin standard library" to "JetBrains"
+)
+
+@Composable
+fun LicensesScreen(onBack: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize().background(Bg)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp)
+        ) {
+            Spacer(Modifier.height(20.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(Card).clickable { onBack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.ArrowBack, "Back", tint = TextMain, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Text("Licenses and credits", color = TextMain, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Blurify")
+            Spacer(Modifier.height(10.dp))
+            LicenseCard(
+                "Made by Houssam (TikTok @mituhype)",
+                "Copyright 2026 Houssam. The source code is public at github.com/Houssam-2021/Blur and is " +
+                    "licensed under the PolyForm Noncommercial License 1.0.0: you may read, use and change it " +
+                    "for noncommercial purposes, and you must keep the copyright notice."
+            )
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Built with")
+            Spacer(Modifier.height(10.dp))
+            LicenseCard(
+                "Open-source components",
+                OpenSourceParts.joinToString("\n") { "${it.first} (${it.second})" } +
+                    "\n\nAll of these are licensed under the Apache License, Version 2.0."
+            )
+            Spacer(Modifier.height(10.dp))
+            LicenseCard(
+                "Apache License 2.0",
+                "Licensed under the Apache License, Version 2.0 (the \"License\"); you may not use these " +
+                    "components except in compliance with the License. You may obtain a copy of the License at " +
+                    "https://www.apache.org/licenses/LICENSE-2.0\n\n" +
+                    "Unless required by applicable law or agreed to in writing, software distributed under the " +
+                    "License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, " +
+                    "either express or implied. See the License for the specific language governing permissions " +
+                    "and limitations under the License."
+            )
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Trademarks")
+            Spacer(Modifier.height(10.dp))
+            LicenseCard(
+                "Not affiliated",
+                "HyperOS is a trademark of Xiaomi and One UI is a trademark of Samsung. Blurify is an independent " +
+                    "app and isn't affiliated with, or endorsed by, either company."
+            )
+            Spacer(Modifier.height(30.dp))
+        }
+    }
+}
+
+@Composable
+private fun LicenseCard(title: String, body: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Card)
+            .padding(16.dp)
+    ) {
+        Text(title, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Text(body, color = TextSub, fontSize = 13.sp, lineHeight = 19.sp)
     }
 }
 

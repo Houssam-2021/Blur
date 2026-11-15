@@ -46,6 +46,7 @@ class VolumeOverlayController(
 
     companion object {
         private const val DISMISS_DELAY_MS = 2800L
+        private const val RAPID_PRESSES = 3
     }
 
     private val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -63,6 +64,8 @@ class VolumeOverlayController(
     private var isCapturingScreenshot = false
     // Read when the bar opens, so a change in Blurify's settings shows up the next time
     private var liquidLook = false
+    // Presses since the bar appeared: after a few quick ones it turns into the slim bar
+    private val rapidPresses = mutableIntStateOf(0)
 
     private val stream = AudioManager.STREAM_MUSIC
 
@@ -79,6 +82,7 @@ class VolumeOverlayController(
     private var dndTimerRunnable: Runnable? = null
 
     fun showOverlayImmediate() {
+        if (overlayView == null || !overlayVisible.value) rapidPresses.intValue = 0
         refreshState()
         if (overlayView == null) showOverlay()
         overlayVisible.value = true // replays the elastic enter if the bar was leaving
@@ -97,6 +101,7 @@ class VolumeOverlayController(
         val next = (audioManager.getStreamVolume(stream) + if (raise) 1 else -1).coerceIn(0, max)
         audioManager.setStreamVolume(stream, next, 0)
         showOverlayImmediate()
+        rapidPresses.intValue++
         volumeFraction.floatValue = if (max > 0) next.toFloat() / max else 0f
     }
 
@@ -221,7 +226,7 @@ class VolumeOverlayController(
     // ----- Overlay window -----
 
     private fun showOverlay() {
-        liquidLook = LookStore.liquid(service)
+        liquidLook = LookStore.glass(service)
         val owner = OverlayLifecycleOwner()
         owner.onCreate()
         lifecycleOwner = owner
@@ -251,6 +256,8 @@ class VolumeOverlayController(
                     onExited = { if (!overlayVisible.value) removeOverlay() },
                     backdropBitmap = backdropBitmap.value,
                     liquid = liquidLook,
+                    // Only the glass look turns into the thin bar; Blurify's own look never does
+                    collapsed = liquidLook && rapidPresses.intValue >= RAPID_PRESSES,
                     onVolumeChange = { frac ->
                         setVolumeFromSlider(frac)
                         resetDismissTimer()
@@ -333,7 +340,7 @@ class VolumeOverlayController(
         ScreenshotApi.take(service) { shot ->
             try {
                 // Blur the whole screen once; each UI element draws only the region directly behind itself.
-                // Liquid glass bends the real scene, so it gets a sharper, larger copy than the frosted look
+                // Glass bends the real scene, so it gets a sharper, larger copy than the frosted look
                 if (shot != null) {
                     backdropBitmap.value =
                         if (liquidLook) BlurHelper.fastBlur(shot, 0.5f, 2) else BlurHelper.fastBlur(shot, 0.25f, 12)

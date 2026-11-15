@@ -35,7 +35,7 @@ import com.miui.volumebar.util.OverlayLifecycle
 import kotlin.math.roundToInt
 
 /**
- * The liquid glass control center. A strip over the top-right of the status bar catches a downward
+ * The glass control center. A strip over the top-right of the status bar catches a downward
  * swipe; the panel is a full-screen overlay over a blurred screenshot, with tiles that really work
  * where Android lets an app do so, and open the matching system panel where it does not.
  */

@@ -20,7 +20,7 @@ import com.miui.volumebar.util.BackdropCapture
 import com.miui.volumebar.util.OverlayLifecycle
 
 /**
- * Shows the latest notifications as liquid glass cards on the lock screen. Same method as the volume
+ * Shows the latest notifications as glass cards on the lock screen. Same method as the volume
  * bar: screenshot the screen, blur it, and let each card show the part of it behind itself.
  */
 class LockNotificationsController(private val service: AccessibilityService) {

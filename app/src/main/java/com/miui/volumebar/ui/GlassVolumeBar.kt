@@ -6,7 +6,14 @@ import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,7 +47,7 @@ import androidx.compose.ui.unit.dp
  *
  * "fill" is how much of the pill is filled from the bottom (0 to 1); a pure glass pill uses 0.
  */
-private const val LIQUID_SKSL = """
+private const val GLASS_PILL_SKSL = """
     uniform shader photo;
     uniform float2 size;
     uniform float2 origin;
@@ -50,6 +57,7 @@ private const val LIQUID_SKSL = """
     uniform float shine;
     uniform float unit;
     uniform float calm;
+    uniform float darken;
 
     float sdBox(float2 p, float2 b, float r) {
         float2 q = abs(p) - b + float2(r);
@@ -91,47 +99,26 @@ private const val LIQUID_SKSL = """
                           sdBox(c + ey, hs, r) - sdBox(c - ey, hs, r));
         float2 n = length(g) > 0.0001 ? normalize(g) : float2(0.0, -1.0);
 
-        // Clear glass: the middle shows the scene as it is
-        float edge = 1.0 - smoothstep(0.0, w * 0.30, depth);
-        float bend = edge * edge * w * 0.26 * (1.0 - 0.75 * calm);
-        // Compress what lies under the glass toward the rim, like a thick convex lens: the rim shows
-        // content from further in, never content from outside the shape, so nothing is repeated
-        half3 col = backdrop(p - n * bend, n * edge * edge * 2.0);
+        // The glass bends what lies behind it only along the top cap: the scene just above the pill is
+        // pulled into the cap, Everywhere else it shows the scene as it is.
+        float topFacing = pow(clamp(-n.y, 0.0, 1.0), 1.5);
+        float edge = 1.0 - smoothstep(0.0, w * 0.34, depth);
+        float pull = edge * edge * w * (0.20 * topFacing + 0.02) * (1.0 - 0.8 * calm);
+        half3 col = backdrop(p + n * pull, n * edge * edge * 0.8);
 
-        // A grey, slightly milky tint; the rim is clearer than the middle
-        float tint = mix(0.46 * (1.0 - 0.65 * edge), 0.78, calm);
-        col = mix(col, half3(0.47, 0.44, 0.41), tint);
+        // A soft, milky grey wash: darks come up a little, colours are calmer
+        float lum = dot(col, half3(0.299, 0.587, 0.114));
+        col = mix(half3(lum), col, 0.70);
+        float veil = mix(0.34, 0.80, calm);
+        col = mix(col, half3(0.62, 0.60, 0.58), veil);
+        // The thin bar: a darker glass track
+        col = mix(col, col * 0.30 + half3(0.02), darken);
 
-        // Light from the top left along the rim, a little shade on the right
-        float up = clamp(-n.y, 0.0, 1.0);
-        float left = clamp(-n.x, 0.0, 1.0);
-        float right = clamp(n.x, 0.0, 1.0);
-        float side = 1.0 - smoothstep(0.0, w * 0.18, depth);
-        float cap = (1.0 - smoothstep(0.0, w * 0.22, depth)) * up;
-        col += half3((side * left * 0.06 + cap * 0.05) * shine);
-        col -= half3(side * right * 0.05 * shine);
-
-        // The filled part: bright white with a soft grey edge all around it
+        // The filled part: bright, very slightly see-through. No outline, no shading.
         float line = size.y * (1.0 - fill);
         float filled = fill > 0.001 ? smoothstep(line - 0.5, line + 0.5, p.y) : 0.0;
-        float rimW = w * 0.10;
-        float shade = (1.0 - smoothstep(0.0, rimW, depth));
-        shade = shade * shade;
-        half3 body = half3(0.975) - half3(shade * 0.24);
-        body = mix(body, col, 0.03);
+        half3 body = mix(half3(0.975, 0.98, 0.99), col, 0.08);
         col = mix(col, body, filled);
-
-        // A bright curved highlight hugging the top left rim, and a faint one on the opposite side
-        float lightDir = clamp(dot(n, normalize(float2(-0.55, -0.83))), 0.0, 1.0);
-        float backDir = clamp(dot(n, normalize(float2(0.55, 0.83))), 0.0, 1.0);
-        float band = smoothstep(w * 0.015, w * 0.045, depth) * (1.0 - smoothstep(w * 0.045, w * 0.11, depth));
-        col += half3(band * pow(lightDir, 1.5) * 0.30 * shine * (1.0 - filled * 0.8));
-        col += half3(band * pow(backDir, 2.0) * 0.08 * shine * (1.0 - filled * 0.8));
-
-        // A very faint outline
-        float rim = 1.0 - smoothstep(0.4, 1.5, depth);
-        float facing = clamp(dot(n, normalize(float2(-0.6, -0.8))), 0.0, 1.0);
-        col += half3(rim * (0.05 + 0.10 * facing) * shine);
 
         return half4(clamp(col, 0.0, 1.0), 1.0) * cover;
     }
@@ -139,12 +126,12 @@ private const val LIQUID_SKSL = """
 
 /** Everything that needs Android 13's RuntimeShader, kept apart so older versions never load it. */
 @RequiresApi(33)
-private object LiquidShader {
-    fun create(): Any = RuntimeShader(LIQUID_SKSL)
+private object GlassPillShader {
+    fun create(): Any = RuntimeShader(GLASS_PILL_SKSL)
 
     fun brush(
         shader: Any, photo: Shader, width: Float, height: Float, originX: Float, originY: Float,
-        scaleX: Float, scaleY: Float, radius: Float, fill: Float, unit: Float, calm: Float
+        scaleX: Float, scaleY: Float, radius: Float, fill: Float, unit: Float, calm: Float, darken: Float
     ): ShaderBrush {
         val runtime = shader as RuntimeShader
         runtime.setInputShader("photo", photo)
@@ -156,12 +143,13 @@ private object LiquidShader {
         runtime.setFloatUniform("shine", 1f)
         runtime.setFloatUniform("unit", unit)
         runtime.setFloatUniform("calm", calm)
+        runtime.setFloatUniform("darken", darken)
         return ShaderBrush(runtime)
     }
 }
 
 /** The painted version for Android 12 and older, or while the screenshot is not ready. */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.paintedLiquid(radiusPx: Float, fill: Float) {
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.paintedGlass(radiusPx: Float, fill: Float) {
     val corner = CornerRadius(radiusPx)
     drawRoundRect(
         Brush.verticalGradient(listOf(Color(0xE6A6A09A), Color(0xE67E7873))),
@@ -182,16 +170,17 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.paintedLiquid(radiu
 }
 
 /**
- * A liquid glass pill, optionally filled from the bottom. [backdrop] is the screenshot of the display
+ * A glass pill, optionally filled from the bottom. [backdrop] is the screenshot of the display
  * behind it (lightly blurred); the pill shows the part directly behind itself.
  */
 @Composable
-fun LiquidGlassPill(
+fun GlassPill(
     backdrop: Bitmap?,
     cornerRadius: Dp,
     fill: Float,
     modifier: Modifier = Modifier,
     calm: Float = 0f, // 0 is the clear glass of the compact bar; 1 is a frosted, quiet version for panels
+    darken: Float = 0f, // darkens the glass for the thin bar
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
@@ -208,7 +197,7 @@ fun LiquidGlassPill(
             }
         }
     }
-    val runtime: Any? = remember { if (Build.VERSION.SDK_INT >= 33) LiquidShader.create() else null }
+    val runtime: Any? = remember { if (Build.VERSION.SDK_INT >= 33) GlassPillShader.create() else null }
 
     Box(
         modifier = modifier
@@ -219,18 +208,57 @@ fun LiquidGlassPill(
                 if (Build.VERSION.SDK_INT >= 33 && runtime != null && photo != null && usable != null) {
                     view.getLocationOnScreen(loc)
                     drawRect(
-                        LiquidShader.brush(
+                        GlassPillShader.brush(
                             runtime, photo, size.width, size.height, loc[0] + topLeft.x, loc[1] + topLeft.y,
                             usable.width / metrics.widthPixels.toFloat(),
                             usable.height / metrics.heightPixels.toFloat(),
-                            radiusPx, f, 64.dp.toPx(), calm.coerceIn(0f, 1f)
+                            radiusPx, f, 64.dp.toPx(), calm.coerceIn(0f, 1f), darken.coerceIn(0f, 1f)
                         )
                     )
                 } else {
-                    paintedLiquid(radiusPx, f)
+                    paintedGlass(radiusPx, f)
                 }
             },
         contentAlignment = contentAlignment,
         content = content
     )
+}
+
+/**
+ * The speaker icon of the liquid look: a speaker with up to three waves. A wave fades in each time the
+ * volume passes a third of the way up, so the icon follows the finger.
+ */
+@Composable
+fun GlassSpeaker(fraction: Float, color: Color, modifier: Modifier = Modifier) {
+    val wave1 by animateFloatAsState(if (fraction > 0.02f) 1f else 0f, tween(160), label = "wave1")
+    val wave2 by animateFloatAsState(if (fraction > 0.34f) 1f else 0f, tween(160), label = "wave2")
+    val wave3 by animateFloatAsState(if (fraction > 0.67f) 1f else 0f, tween(160), label = "wave3")
+    Canvas(modifier = modifier.size(26.dp)) {
+        val s = size.minDimension
+        val body = Path().apply {
+            moveTo(0.08f * s, 0.38f * s)
+            lineTo(0.26f * s, 0.38f * s)
+            lineTo(0.44f * s, 0.22f * s)
+            lineTo(0.44f * s, 0.78f * s)
+            lineTo(0.26f * s, 0.62f * s)
+            lineTo(0.08f * s, 0.62f * s)
+            close()
+        }
+        drawPath(body, color)
+        drawPath(body, color, style = Stroke(width = 0.04f * s, join = StrokeJoin.Round))
+        val c = Offset(0.46f * s, 0.5f * s)
+        listOf(0.17f to wave1, 0.30f to wave2, 0.43f to wave3).forEach { (r, a) ->
+            if (a > 0.01f) {
+                drawArc(
+                    color = color.copy(alpha = color.alpha * a),
+                    startAngle = -42f,
+                    sweepAngle = 84f,
+                    useCenter = false,
+                    topLeft = Offset(c.x - r * s, c.y - r * s),
+                    size = Size(2f * r * s, 2f * r * s),
+                    style = Stroke(width = 0.055f * s, cap = StrokeCap.Round)
+                )
+            }
+        }
+    }
 }

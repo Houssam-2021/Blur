@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.app.NotificationManagerCompat
 import com.miui.volumebar.service.VolumeAccessibilityService
 import com.miui.volumebar.setup.CustomizeScreen
+import com.miui.volumebar.setup.LicensesScreen
 import com.miui.volumebar.setup.HomeScreen
 import com.miui.volumebar.setup.Permissions
 import com.miui.volumebar.setup.SettingsScreen
@@ -54,9 +55,10 @@ class MainActivity : ComponentActivity() {
                 var setupDone by remember { mutableStateOf(prefs.getBoolean("setup_done", false)) }
                 var controlCenterOn by remember { mutableStateOf(ControlCenterController.enabled(this)) }
                 var dockOn by remember { mutableStateOf(DockStore.enabled(this)) }
-                var liquidLook by remember { mutableStateOf(LookStore.liquid(this)) }
+                var liquidLook by remember { mutableStateOf(LookStore.glass(this)) }
                 var showSettings by remember { mutableStateOf(false) }
                 var showCustomize by remember { mutableStateOf(false) }
+                var showLicenses by remember { mutableStateOf(false) }
 
                 // Re-check while the screen is open so steps tick off as soon as the user returns
                 LaunchedEffect(Unit) {
@@ -87,15 +89,19 @@ class MainActivity : ComponentActivity() {
                 if (!setupDone) {
                     SetupWizard(permissions, actions)
                 } else {
-                    BackHandler(enabled = showSettings) { if (showCustomize) showCustomize = false else showSettings = false }
-                    if (showCustomize) {
+                    BackHandler(enabled = showSettings) {
+                        if (showLicenses) showLicenses = false else if (showCustomize) showCustomize = false else showSettings = false
+                    }
+                    if (showLicenses) {
+                        LicensesScreen(onBack = { showLicenses = false })
+                    } else if (showCustomize) {
                         CustomizeScreen(onBack = { showCustomize = false })
                     } else if (showSettings) {
                         SettingsScreen(
                             liquidLook = liquidLook,
                             onLook = {
                                 liquidLook = it
-                                LookStore.setLiquid(this, it)
+                                LookStore.setGlass(this, it)
                             },
                             controlCenterOn = controlCenterOn,
                             controlCenterSupported = ControlCenterController.supported(),
@@ -109,6 +115,7 @@ class MainActivity : ComponentActivity() {
                                 DockStore.setEnabled(this, it)
                             },
                             onCustomize = { showCustomize = true },
+                            onLicenses = { showLicenses = true },
                             onTryControlCenter = { VolumeAccessibilityService.instance?.openControlCenter() },
                             onRunSetupAgain = {
                                 prefs.edit().putBoolean("setup_done", false).apply()

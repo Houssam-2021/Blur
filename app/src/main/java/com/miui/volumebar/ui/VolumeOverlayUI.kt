@@ -2,6 +2,11 @@ package com.miui.volumebar.ui
 
 import android.graphics.Bitmap
 import android.media.AudioManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
@@ -69,8 +74,11 @@ private val SliderShape = RoundedCornerShape(20.dp)
 private val ButtonShape = RoundedCornerShape(50) // capsule
 private val PanelShape = RoundedCornerShape(30.dp)
 private val PillShape = RoundedCornerShape(18.dp)
-private val LiquidShape = RoundedCornerShape(50)
-private val LiquidIcon = Color(0xFFA2A2A7)
+private val GlassShape = RoundedCornerShape(50)
+private val GlassIcon = Color(0xCC9A9A9F)
+private val GLASS_WIDTH = 60.dp
+private val GLASS_THIN_WIDTH = 22.dp
+private val GLASS_THIN_HEIGHT = 250.dp
 
 private val Accent = Color(0xFF2B72EE)
 private val IconOnFill = Color(0xFF55555C)
@@ -101,7 +109,8 @@ fun VolumeOverlayUI(
     onDndTimer: (Int) -> Unit,
     onInteract: () -> Unit,
     modifier: Modifier = Modifier,
-    liquid: Boolean = false // the second look; Blurify's own look when false
+    liquid: Boolean = false, // the second look; Blurify's own look when false
+    collapsed: Boolean = false // glass only: pressed several times in a row, the bar turns into the thin one
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -138,6 +147,7 @@ fun VolumeOverlayUI(
                 isDndOn = isDndOn,
                 backdropBitmap = backdropBitmap,
                 liquid = liquid,
+                collapsed = collapsed,
                 onVolumeChange = onVolumeChange,
                 onToggleRinger = onToggleRinger,
                 onToggleDnd = onToggleDnd,
@@ -160,6 +170,7 @@ private fun CompactBar(
     isDndOn: Boolean,
     backdropBitmap: Bitmap?,
     liquid: Boolean,
+    collapsed: Boolean,
     onVolumeChange: (Float) -> Unit,
     onToggleRinger: () -> Unit,
     onToggleDnd: () -> Unit,
@@ -185,6 +196,22 @@ private fun CompactBar(
         label = "volumeFractionAnimation"
     )
 
+    // Glass only: held or pressed again and again, the pill narrows and grows into a thin bar
+    val collapseT by animateFloatAsState(
+        targetValue = if (liquid && collapsed) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "barCollapse"
+    )
+    val baseWidth = if (liquid) GLASS_WIDTH else CONTROL_WIDTH
+    val sliderWidth = baseWidth + (GLASS_THIN_WIDTH - baseWidth) * collapseT
+    val sliderHeight = SLIDER_HEIGHT + (GLASS_THIN_HEIGHT - SLIDER_HEIGHT) * collapseT
+    // A finger on the glass swells it a little
+    val touchScale by animateFloatAsState(
+        targetValue = if (liquid && userDragging) 1.05f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "barTouch"
+    )
+
     // Staggered elastic entrance: slider first, then the two buttons.
     val sliderProgress = rememberElasticProgress(visible, 0L)
     val ringerProgress = rememberElasticProgress(visible, 50L)
@@ -202,10 +229,11 @@ private fun CompactBar(
         // 1. Volume slider: frosted glass track, white fill (flat top, rounded bottom)
         Box(
             modifier = Modifier
-                .width(CONTROL_WIDTH)
-                .height(SLIDER_HEIGHT)
+                .width(sliderWidth)
+                .height(sliderHeight)
                 .elasticEntrance({ sliderProgress.value }, slidePx, origin)
-                .clip(if (liquid) LiquidShape else SliderShape)
+                .then(if (liquid) Modifier.graphicsLayer { scaleX = touchScale; scaleY = touchScale } else Modifier)
+                .clip(if (liquid) GlassShape else SliderShape)
                 .onSizeChanged { sliderHeightPx = it.height.toFloat() }
                 .pointerInput(Unit) {
                     detectDragGestures(
@@ -231,11 +259,12 @@ private fun CompactBar(
                 }
         ) {
             if (liquid) {
-                // Liquid glass: the glass and the white fill are drawn together
-                LiquidGlassPill(
+                // Glass: the glass and the white fill are drawn together
+                GlassPill(
                     backdrop = backdropBitmap,
-                    cornerRadius = CONTROL_WIDTH / 2,
+                    cornerRadius = sliderWidth / 2,
                     fill = animatedFraction,
+                    darken = collapseT * 0.62f,
                     modifier = Modifier.matchParentSize()
                 )
             } else {
@@ -301,55 +330,79 @@ private fun CompactBar(
                 else -> Icons.Rounded.VolumeUp
             }
 
-            Icon(
+            if (liquid) {
+                // The speaker gains a wave for every third of the volume, and fades out as the pill thins
+                GlassSpeaker(
+                    fraction = fillFraction,
+                    color = if (fillFraction > 0.12f) GlassIcon else Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 10.dp)
+                        .graphicsLayer { alpha = (1f - collapseT * 1.6f).coerceIn(0f, 1f) }
+                )
+            } else Icon(
                 imageVector = iconVector,
                 contentDescription = "Volume Icon",
-                tint = if (fillFraction > 0.12f) (if (liquid) LiquidIcon else Accent) else Color.White,
+                tint = if (fillFraction > 0.12f) Accent else Color.White,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (liquid) 10.dp else 9.dp) // keeps the icon's center where it was
-                    .size(if (liquid) 24.dp else 26.dp)
+                    .padding(bottom = 9.dp) // keeps the icon's center where it was, 22dp up
+                    .size(26.dp)
             )
         }
 
-        Spacer(Modifier.height(SLIDER_BUTTON_GAP))
+        val buttons: @Composable () -> Unit = {
+            Spacer(Modifier.height(SLIDER_BUTTON_GAP))
 
-        // 2. Ringer mode capsule (bell)
-        GlassButton(
-            backdropBitmap = backdropBitmap,
-            liquid = liquid,
-            windowOffsetY = OUTER_PAD + SLIDER_HEIGHT + SLIDER_BUTTON_GAP,
-            enterProgress = { ringerProgress.value },
-            slidePx = slidePx,
-            origin = origin,
-            onClick = onToggleRinger
-        ) {
-            Icon(
-                imageVector = ringerIcon(ringerMode),
-                contentDescription = "Ringer Mode",
-                tint = Color.White,
-                modifier = Modifier.size(32.dp)
-            )
+            // 2. Ringer mode capsule (bell)
+            GlassButton(
+                backdropBitmap = backdropBitmap,
+                liquid = liquid,
+                windowOffsetY = OUTER_PAD + SLIDER_HEIGHT + SLIDER_BUTTON_GAP,
+                enterProgress = { ringerProgress.value },
+                slidePx = slidePx,
+                origin = origin,
+                onClick = onToggleRinger
+            ) {
+                Icon(
+                    imageVector = ringerIcon(ringerMode),
+                    contentDescription = "Ringer Mode",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+
+            Spacer(Modifier.height(BUTTON_GAP))
+
+            // 3. Do Not Disturb capsule (moon)
+            GlassButton(
+                backdropBitmap = backdropBitmap,
+                liquid = liquid,
+                windowOffsetY = OUTER_PAD + SLIDER_HEIGHT + SLIDER_BUTTON_GAP + BUTTON_HEIGHT + BUTTON_GAP,
+                enterProgress = { dndProgress.value },
+                slidePx = slidePx,
+                origin = origin,
+                onClick = onToggleDnd
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DarkMode,
+                    contentDescription = "DND Mode",
+                    tint = if (isDndOn) Accent else Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
         }
-
-        Spacer(Modifier.height(BUTTON_GAP))
-
-        // 3. Do Not Disturb capsule (moon)
-        GlassButton(
-            backdropBitmap = backdropBitmap,
-            liquid = liquid,
-            windowOffsetY = OUTER_PAD + SLIDER_HEIGHT + SLIDER_BUTTON_GAP + BUTTON_HEIGHT + BUTTON_GAP,
-            enterProgress = { dndProgress.value },
-            slidePx = slidePx,
-            origin = origin,
-            onClick = onToggleDnd
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.DarkMode,
-                contentDescription = "DND Mode",
-                tint = if (isDndOn) Accent else Color.White,
-                modifier = Modifier.size(32.dp)
-            )
+        if (liquid) {
+            // The ringer and do-not-disturb capsules fold away while the bar turns thin
+            AnimatedVisibility(
+                visible = !collapsed,
+                enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)),
+                exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { buttons() }
+            }
+        } else {
+            buttons()
         }
     }
 }
@@ -383,7 +436,7 @@ private fun ExpandedPanel(
     ) {
         // One frosted panel; the controls on it are just translucent tints.
         if (liquid) {
-            LiquidGlassPill(
+            GlassPill(
                 backdrop = backdropBitmap,
                 cornerRadius = 30.dp,
                 fill = 0f,
@@ -486,7 +539,7 @@ private fun VerticalPill(
         modifier = Modifier
             .width(PILL_WIDTH)
             .height(PILL_HEIGHT)
-            .clip(if (liquid) LiquidShape else SliderShape)
+            .clip(if (liquid) GlassShape else SliderShape)
             .then(if (liquid) Modifier else Modifier.background(Color(0x66000000)))
             .onSizeChanged { heightPx = it.height.toFloat() }
             .pointerInput(Unit) {
@@ -512,7 +565,7 @@ private fun VerticalPill(
             }
     ) {
         if (liquid) {
-            LiquidGlassPill(
+            GlassPill(
                 backdrop = backdropBitmap,
                 cornerRadius = PILL_WIDTH / 2,
                 fill = fill,
@@ -532,7 +585,7 @@ private fun VerticalPill(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (fill > 0.2f) (if (liquid) LiquidIcon else IconOnFill) else Color(0xE6FFFFFF),
+            tint = if (fill > 0.2f) (if (liquid) GlassIcon else IconOnFill) else Color(0xE6FFFFFF),
             modifier = Modifier
                 .size(26.dp)
                 .align(Alignment.BottomCenter)
@@ -692,7 +745,7 @@ private fun GlassButton(
         contentAlignment = Alignment.Center
     ) {
         if (liquid) {
-            LiquidGlassPill(
+            GlassPill(
                 backdrop = backdropBitmap,
                 cornerRadius = BUTTON_HEIGHT / 2,
                 fill = 0f,

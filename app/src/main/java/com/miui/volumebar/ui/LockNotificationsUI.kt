@@ -25,7 +25,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
-/** One lock screen card: a liquid glass pill with the app's real system icon. */
+/** One lock screen card: a glass pill with the app's real system icon. */
 data class LockCard(val key: String, val appName: String, val title: String, val text: String,
                     val timeMs: Long, val icon: Bitmap?)
 
